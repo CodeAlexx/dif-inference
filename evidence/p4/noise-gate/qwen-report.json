@@ -1,0 +1,15 @@
+{
+  "backend": "cuda-nvrtc-cublaslt-cudnn",
+  "device": "NVIDIA GeForce RTX 5080",
+  "diffir_fingerprint": "99037ce1bfca2d7facb897111eeaff6e13f04e4581e56373886eca3fb79ba854",
+  "payload_sha256": "9570069c9e18992cc57b853183d4192dab87e419bdd1a8e04ef644dcebffc0ef",
+  "tokens": 546,
+  "preparation_ms": 3873.0950750000002,
+  "execution_ms": 49.056480407714844,
+  "wall_seconds": 3.9378841310000001,
+  "resident_bytes": 8193020928,
+  "resident_streamed_constants": 397,
+  "pipeline_profile": {"enabled":false,"resident_weight_bytes":0,"resident_host_prefault_ms":0,"resident_h2d_ms":0,"streamed_weight_bytes":0,"streamed_direct_read_bytes":0,"streamed_host_stage_ms":0,"streamed_host_wait_ms":0,"streamed_h2d_ms":0,"operation_kernel_ms":0,"attention_kernel_ms":0,"non_kernel_device_timeline_ms":0},
+  "telemetry": {"kernel_launches":447,"cublaslt_matmuls":252,"cudnn_attention_dispatches":36,"h2d_copies":3,"h2d_bytes":4914,"d2h_copies":12,"d2h_bytes":31457280,"event_records":737,"stream_wait_events":0,"host_event_synchronizes":1,"host_stream_synchronizes":2},
+  "operations": []
+}

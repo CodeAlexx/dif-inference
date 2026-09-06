@@ -1,0 +1,11 @@
+preflight 200 {"schema": "serenity.generate.preflight.v1", "admitted": true, "error": "", "model": "flux-2-klein-base-9b", "checkpoint_path": "", "backend": "flux2", "output_root": {"root_kind": "ui_workflow_gallery", "root": "/home/alex/diffusion-compiler-ui/output/run", "artifact_pattern": "job-XXXX.png", "resu
+generate 200 {'job_id': 'job-0004'}
+    0.0s state=running step=0/50 progress=0 err=''
+   18.0s state=running step=3/50 progress=6 err=''
+   20.0s state=running step=6/50 progress=12 err=''
+   22.0s state=running step=8/50 progress=16 err=''
+   24.0s state=running step=11/50 progress=22 err=''
+   24.0s cancel -> 200 {'job_id': 'job-0004', 'state': 'running', 'cancel_requested': True}
+   26.0s state=cancelled step=11/50 progress=22 err=''
+FINAL {"id": "job-0004", "created": "Sat, 05 Sep 2026 16:40:23 GMT", "model": "flux-2-klein-base-9b", "state": "cancelled", "progress": 22, "step": 11, "total": 50, "image_index": 0, "image_count": 1, "output_path": "", "error": "", "result_manifests": {"server_result_manifest": {"present": false, "path": null}, "worker_result_manifest": {"present": false, "path": null}}}
+wall 26.0s

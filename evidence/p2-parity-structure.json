@@ -1,0 +1,167 @@
+{
+ "status_bar": {
+  "health_text": "Idle",
+  "runtime_label": "flux2 \u00b7 Diffusion Compiler \u00b7 admitted",
+  "model_badge": "flux-2-klein-base-9b"
+ },
+ "model_section": {
+  "picker_items": 1,
+  "refresh_btn": true
+ },
+ "core": {
+  "images": "1",
+  "seed": "-1",
+  "seed_shuffle": true,
+  "seed_prev": true,
+  "seed_random_toggle": true,
+  "steps_range": true,
+  "cfg_range": true
+ },
+ "resolution": {
+  "aspect_options": [
+   "512\u00d7512",
+   "1024\u00d71024",
+   "1152\u00d7896",
+   "896\u00d71152",
+   "1344\u00d7768",
+   "768\u00d71344",
+   "1280\u00d7832",
+   "832\u00d71280"
+  ],
+  "width_input": true,
+  "height_input": true,
+  "swap_btn": true
+ },
+ "sampling": {
+  "samplers": [
+   "Euler"
+  ],
+  "schedulers": [
+   "Simple",
+   "FLUX.2"
+  ],
+  "variation_seed": true,
+  "variation_strength": true,
+  "variation_visible": false
+ },
+ "lora": {
+  "section_visible": true,
+  "picker": true,
+  "capability_note": "Maximum 1 LoRA"
+ },
+ "source_image": {
+  "file_input": true,
+  "drop_zone": true,
+  "preview": true,
+  "clear_btn": true,
+  "creativity_slider": false,
+  "creativity_input": false
+ },
+ "refine_hires": {
+  "rows": [
+   "refine / upscale refiner and upscale controls with truthful current runtime admission.",
+   "post upscale super resolution realesrgan seedvr2",
+   "post upscale factor resolution 2x 4x",
+   "refiner control percentage",
+   "refiner method",
+   "refiner upscale",
+   "refiner model override",
+   "refiner vae",
+   "refiner sampler",
+   "refiner steps"
+  ]
+ },
+ "advanced_sampling": {
+  "sigma_shift": true,
+  "sigma_shift_enabled": false,
+  "disabled_rows": [
+   "personal note metadata",
+   "clip l model",
+   "clip g model",
+   "clip vision model",
+   "advanced sampling sigma schedule and advanced sampler parameters.",
+   "sigma shift flow schedule",
+   "sampler sigma min",
+   "sampler sigma max",
+   "sampler eta",
+   "clip stop layer clip skip",
+   "restart sampling"
+  ],
+  "clip_skip_input": false,
+  "note": "This runtime admits no user-adjustable advanced sampler fields; unsupported values stay disabled and are not posted."
+ },
+ "grid": {
+  "x": true,
+  "y": true,
+  "z": true,
+  "run": true,
+  "axes": [
+   "seed",
+   "cfg",
+   "steps",
+   "sampler",
+   "scheduler"
+  ]
+ },
+ "prompt": {
+  "textarea": true,
+  "negative": true,
+  "negative_visible": false,
+  "syntax_note_el": true,
+  "style_presets": 12
+ },
+ "history": {
+  "items": 9,
+  "starred_first_toggle": true,
+  "search": true,
+  "upload": true,
+  "delete_all": true,
+  "star_btn": true,
+  "star_toggled": false,
+  "reuse_btn": true,
+  "selected_result_seed": "-1",
+  "reuse_restored_seed": "-1"
+ },
+ "presets": {
+  "save_status": 200,
+  "listed": true,
+  "ui_tab": true
+ },
+ "canvas_tab": {
+  "konva": true,
+  "stage": true,
+  "tool_buttons": [
+   "Select / Bbox (V)",
+   "Brush (B)",
+   "Eraser (E)",
+   "Mask Paint",
+   "Lasso (L)",
+   "SAM3 model is installed but the local mask service on port 7812 is not ready"
+  ]
+ },
+ "workflows_tab": {
+  "node_types": 46,
+  "file_inputs": 12,
+  "buttons": [
+   "Reload UI (Ctrl+Shift+R)",
+   "Queue",
+   "Templates",
+   "Load Workflow (Ctrl+O)",
+   "Save Workflow (Ctrl+S)",
+   "Queue Prompt (Ctrl+Enter)"
+  ],
+  "templates": 0
+ },
+ "models_tab": {
+  "rows": 330
+ },
+ "queue_tab": {
+  "cancel_current": false,
+  "pending_list": true
+ },
+ "settings_tab": {
+  "text": "",
+  "has_model_dirs": false,
+  "has_output": true
+ }
+}

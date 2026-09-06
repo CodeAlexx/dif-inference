@@ -1,0 +1,10 @@
+{
+  "prompt_bytes": 154,
+  "token_count": 35,
+  "valid_token_count": 35,
+  "ids_sha256": "14bf568441477f82483583d0040090e9e9fbc066568df48107c3cbc260b2781a",
+  "id_space": 151676,
+  "added_tokens": 33,
+  "first_ids": [32,9104,291,7640,4753,296,1412,264],
+  "last_ids": [819,323,264,28727,30249,50884,10362,13]
+}

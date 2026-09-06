@@ -1,0 +1,12 @@
+CHAIN_EXIT=0 wall=36s
+KREA2_NATIVE_STEP step=1/8 cond_ms=2076.13 cfg=off uncond_ms=0 scheduler_ms=0.555155
+KREA2_NATIVE_STEP step=2/8 cond_ms=1682.03 cfg=off uncond_ms=0 scheduler_ms=0.261356
+KREA2_NATIVE_STEP step=3/8 cond_ms=1678.99 cfg=off uncond_ms=0 scheduler_ms=0.302095
+KREA2_NATIVE_STEP step=4/8 cond_ms=1682.62 cfg=off uncond_ms=0 scheduler_ms=0.464369
+KREA2_NATIVE_STEP step=5/8 cond_ms=1682.19 cfg=off uncond_ms=0 scheduler_ms=0.35104
+KREA2_NATIVE_STEP step=6/8 cond_ms=1679.15 cfg=off uncond_ms=0 scheduler_ms=0.302145
+KREA2_NATIVE_STEP step=7/8 cond_ms=1677.74 cfg=off uncond_ms=0 scheduler_ms=0.301704
+KREA2_NATIVE_STEP step=8/8 cond_ms=1677.34 cfg=off uncond_ms=0 scheduler_ms=0.296885
+KREA2_SAMPLER_PASS steps=8 fingerprint=04002dde51d57bdb590bbc461d86128502aad9408a7b9cd72bf6ac0dfbc93e00 output_sha256=8ccbe61d4c8c155afeaf57acba49c3d27fa949d78a5b2526991feac7a3d21e28
+KREA2_VAE_FULL_PASS report="vae-report.json" png="image.png" decode_wall_ms=658.254 cosine=1 rel_l2=0
+[difc-krea2] done /home/alex/diffusion-compiler-ui/evidence/p4/run-1/image.png

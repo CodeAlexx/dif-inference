@@ -1,0 +1,10 @@
+[ui] model flux-2-klein-base-9b | flux2 · Diffusion Compiler · admitted
+[ui] after submit ["job-0013:running","job-0014:queued","job-0015:queued"]
+[shot] evidence/ui/p2-08-queue-before.png
+[ui] pending remove buttons ["job-0014","job-0015"]
+[ui] after remove ["job-0013:running","job-0014:cancelled","job-0015:queued"]
+[ui] cancel-current button true
+[ui] after cancel current ["job-0013:cancelled","job-0014:cancelled","job-0015:running"]
+[shot] evidence/ui/p2-09-queue-after.png
+[ui] final ["job-0013:cancelled","job-0014:cancelled","job-0015:cancelled"]
+RESULT null

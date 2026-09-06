@@ -1,0 +1,68 @@
+[difc-krea2] phase=tokenize
+{
+  "prompt_bytes": 85,
+  "token_count": 17,
+  "valid_token_count": 17,
+  "ids_sha256": "466b14e1937318b8904ba8c209ee98d21f890245721d7b4c826c05b631502b18",
+  "id_space": 151669,
+  "added_tokens": 26,
+  "first_ids": [32,23285,72318,389,264,57272,22360,1965],
+  "last_ids": [264,3241,11,6556,3100,11,20312,16062]
+}
+[difc-krea2] phase=conditioning (Qwen3-VL-4B, 546 tokens)
+CUDA_LINEAR_PLAN_CLASS operation=5 key=bf16|m=546|n=4096|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=2 reduction=1 workspace=1152
+CUDA_LINEAR_PLAN_CLASS operation=6 key=bf16|m=546|n=1024|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=12 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=15 key=bf16|m=546|n=2560|k=4096|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=2 reduction=1 workspace=720
+CUDA_LINEAR_PLAN_CLASS operation=18 key=bf16|m=546|n=9728|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=22 key=bf16|m=546|n=2560|k=9728|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=4 reduction=1 workspace=720
+CUDA_LINEAR_PLAN_POOL operations=252 unique=5 reused=247 isolated=0
+CONDITIONING PASS backend=cuda-nvrtc-cublaslt-cudnn tokens=546 shape=[512,2560] payload_sha256=9570069c9e18992cc57b853183d4192dab87e419bdd1a8e04ef644dcebffc0ef prepare_ms=8830.18 run_ms=49.4387 wall_s=8.8946 resident_bytes=8193020928
+[difc-krea2] phase=text-fusion
+CUDA_MEMORY_PLAN tensor_bytes=1345920768 linear_workspace_bytes=67108864 parallel_linear_workspace_bytes=0 attention_workspace_bytes=0 materialized_f32_attention_score_bytes=0 ck_attention_scratch_bytes=0 h3_w8a8_weight_bytes=0 h3_w8a8_scratch_bytes=0 h3_w8a8_tail_weight_bytes=0 h3_w8a8_tail_stage_half_bytes=0 convrot_int8_bytes=0 h3_groupwise_bytes=0 h3_modulation_bytes=0 promoted_streamed_constant_bytes=0 repeated_invariant_cache_bytes=0 h3_convrot_correction_bytes=0 required_bytes=1413029632 free_before_bytes=16011493376 minimum_free_bytes=268435456
+CUDA_MEMORY_SLOT id=54 bytes=75497472
+CUDA_MEMORY_SLOT id=68 bytes=84934656
+CUDA_MEMORY_SLOT id=69 bytes=84934656
+CUDA_MEMORY_SLOT id=70 bytes=84934656
+STREAMED_PREFETCH_PLAN tensors=0 bytes_per_iteration=0
+CUDA_LINEAR_PLAN_CLASS operation=4 key=bf16|m=6144|n=2560|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=22 key=bf16|m=6144|n=6912|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=23 stages=9 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=26 key=bf16|m=6144|n=2560|k=6912|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=59 key=bf16|m=1310720|n=1|k=12|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=13 tile=0 stages=0 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=65 key=bf16|m=512|n=2560|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=83 key=bf16|m=512|n=6912|k=2560|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=87 key=bf16|m=512|n=2560|k=6912|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=119 key=bf16|m=512|n=6144|k=2560|bias=1|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=121 key=bf16|m=512|n=6144|k=6144|bias=1|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=21 stages=10 split_k=3 reduction=1 workspace=768
+CUDA_LINEAR_PLAN_POOL operations=35 unique=9 reused=26 isolated=0
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=54 h2d_bytes=793844760 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=0
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=83 cublaslt_matmuls=35 cublas_gemms=0 cudnn_attention=4 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=2 h2d_bytes=31457792 d2h_copies=6 d2h_bytes=77070336 d2d_copies=0 d2d_bytes=0 event_records=368 stream_wait_events=0 host_event_syncs=1 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+KREA2_TEXT_PASS fingerprint=09523661045963aba9ec908056a14d01bebe3a81b1bb7b6d16857900bc074348 execution_ms=25.814
+[difc-krea2] phase=denoise steps=8 guidance=0 seed=7 variant=turbo resident_mib=11000
+KREA2_RESIDENCY_PLAN hash=cfb33e8417e32b4e95f644fa63aa44eaa880512532ce42791753f7aac9d9854e resident_tensors=203 resident_bytes=10073962752 streamed_bytes=14772338688 required_bytes=11527642624 maximum_bytes=11534336000
+CUDA_LINEAR_PLAN_CLASS operation=2 key=bf16|m=4096|n=6144|k=64|bias=1|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=11 stages=13 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=7 key=bf16|m=1|n=6144|k=256|bias=1|bias_mode=2|implementation=1|workspace=67108864|persist=0 algorithm=13 tile=0 stages=0 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=9 key=bf16|m=1|n=6144|k=6144|bias=1|bias_mode=2|implementation=1|workspace=67108864|persist=0 algorithm=13 tile=0 stages=0 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=11 key=bf16|m=1|n=36864|k=6144|bias=1|bias_mode=2|implementation=1|workspace=67108864|persist=0 algorithm=13 tile=0 stages=0 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=36 key=bf16|m=4608|n=6144|k=6144|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=37 key=bf16|m=4608|n=1536|k=6144|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=61 key=bf16|m=4608|n=16384|k=6144|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=65 key=bf16|m=4608|n=6144|k=16384|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=19 stages=10 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=1583 key=bf16|m=4608|n=64|k=6144|bias=1|bias_mode=1|implementation=1|workspace=1048576|persist=0 algorithm=21 tile=15 stages=12 split_k=6 reduction=1 workspace=288
+CUDA_LINEAR_PLAN_POOL operations=229 unique=9 reused=220 isolated=0
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+KREA2_NATIVE_STEP step=1/8 cond_ms=2076.13 cfg=off uncond_ms=0 scheduler_ms=0.555155
+KREA2_NATIVE_STEP step=2/8 cond_ms=1682.03 cfg=off uncond_ms=0 scheduler_ms=0.261356
+KREA2_NATIVE_STEP step=3/8 cond_ms=1678.99 cfg=off uncond_ms=0 scheduler_ms=0.302095
+KREA2_NATIVE_STEP step=4/8 cond_ms=1682.62 cfg=off uncond_ms=0 scheduler_ms=0.464369
+KREA2_NATIVE_STEP step=5/8 cond_ms=1682.19 cfg=off uncond_ms=0 scheduler_ms=0.35104
+KREA2_NATIVE_STEP step=6/8 cond_ms=1679.15 cfg=off uncond_ms=0 scheduler_ms=0.302145
+KREA2_NATIVE_STEP step=7/8 cond_ms=1677.74 cfg=off uncond_ms=0 scheduler_ms=0.301704
+KREA2_NATIVE_STEP step=8/8 cond_ms=1677.34 cfg=off uncond_ms=0 scheduler_ms=0.296885
+KREA2_SAMPLER_PASS steps=8 fingerprint=04002dde51d57bdb590bbc461d86128502aad9408a7b9cd72bf6ac0dfbc93e00 output_sha256=8ccbe61d4c8c155afeaf57acba49c3d27fa949d78a5b2526991feac7a3d21e28
+[difc-krea2] phase=vae decode
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+KREA2_VAE_FULL_PASS report="vae-report.json" png="image.png" decode_wall_ms=658.254 cosine=1 rel_l2=0
+[difc-krea2] done /home/alex/diffusion-compiler-ui/evidence/p4/run-1/image.png

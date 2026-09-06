@@ -1,0 +1,19 @@
+===== KREA2 TURBO HTTP =====
+preflight 200 {"schema": "serenity.generate.preflight.v1", "admitted": true, "error": "", "model": "krea2-turbo", "checkpoint_path": "/home/alex/diffusion-compiler-ui/models/checkpoints/krea2-turbo.safetensors", "backend": "krea2", "output_root": {"root_kind": "ui_workflow_gallery", "root": "/home/alex/diffusion-
+generate 200 {'job_id': 'job-0022'}
+    0.0s state=failed step=0/8 progress=0 err='send_start failed: write_line: send failed/peer-closed: Broken pipe (os error 32)'
+wall 0.0s
+===== KREA2 TURBO UI =====
+[ui] model krea2-turbo | krea2 · Diffusion Compiler · admitted
+[ui] note  display none
+[ui] job job-0023 done prompt= a ceramic bowl of ripe figs on a marble counter, soft window light, (film grain:1.1) | prompt_raw= 
+RESULT null
+===== KREA2 RAW HTTP (cfg 3.5, negative) =====
+preflight 200 {"schema": "serenity.generate.preflight.v1", "admitted": true, "error": "", "model": "krea2-raw", "checkpoint_path": "/home/alex/diffusion-compiler-ui/models/checkpoints/krea2-raw.safetensors", "backend": "krea2", "output_root": {"root_kind": "ui_workflow_gallery", "root": "/home/alex/diffusion-comp
+generate 200 {'job_id': 'job-0024'}
+  568.3s state=done step=52/52 progress=100 err=''
+wall 568.3s
+preflight 200 {"schema": "serenity.generate.preflight.v1", "admitted": true, "error": "", "model": "krea2-turbo", "checkpoint_path": "/home/alex/diffusion-compiler-ui/models/checkpoints/krea2-turbo.safetensors", "backend": "krea2", "output_root": {"root_kind": "ui_workflow_gallery", "root": "/home/alex/diffusion-
+generate 200 {'job_id': 'job-0025'}
+   32.1s state=done step=8/8 progress=100 err=''
+wall 32.1s

@@ -1,0 +1,29 @@
+[ui] model MiniMax-H3 Base / FL2VA | MiniMax-H3 · Diffusion Compiler · ready | size 832x480 frames 124 seconds 5.167 steps 20 quant int8-fast
+[shot] evidence/ui/p3-02-h3-before.png
+[ui] clicked Generating...
+[ui] 2s Starting MiniMax-H3 T2VA INT8-FAST DiT with cudnn attention and exact step cache | Starting MiniMax-H3 T2VA INT8-FAST DiT with cudnn attention and exact step ca
+[ui] 46s Complete | GPU text conditioning complete · Step 0 / 20
+[ui] 48s Sampling | Denoising evaluation 0 of 0 · Step 0 / 20
+[ui] 64s Sampling · Step 1 / 20 | Denoising evaluation 1 of 19 · Step 1 / 20
+[ui] 71s Sampling · Step 2 / 20 | Denoising evaluation 2 of 19 · Step 2 / 20
+[ui] 75s Sampling · Step 3 / 20 | Denoising evaluation 3 of 19 · Step 3 / 20
+[ui] 79s Sampling · Step 4 / 20 | Denoising evaluation 4 of 19 · Step 4 / 20
+[ui] 85s Sampling · Step 5 / 20 | Denoising evaluation 5 of 19 · Step 5 / 20
+[shot] evidence/ui/p3-03-h3-progress.png
+[ui] 89s Sampling · Step 6 / 20 | Denoising evaluation 6 of 19 · Step 6 / 20
+[ui] 94s Sampling · Step 7 / 20 | Denoising evaluation 7 of 19 · Step 7 / 20
+[ui] 100s Sampling · Step 8 / 20 | Denoising evaluation 8 of 19 · Step 8 / 20
+[ui] 104s Sampling · Step 9 / 20 | Denoising evaluation 9 of 19 · Step 9 / 20
+[ui] 108s Sampling · Step 10 / 20 | Denoising evaluation 10 of 19 · Step 10 / 20
+[ui] 114s Sampling · Step 11 / 20 | Denoising evaluation 11 of 19 · Step 11 / 20
+[ui] 119s Sampling · Step 12 / 20 | Denoising evaluation 12 of 19 · Step 12 / 20
+[ui] 123s Sampling · Step 13 / 20 | Denoising evaluation 13 of 19 · Step 13 / 20
+[ui] 129s Sampling · Step 14 / 20 | Denoising evaluation 14 of 19 · Step 14 / 20
+[ui] 133s Sampling · Step 15 / 20 | Denoising evaluation 15 of 19 · Step 15 / 20
+[ui] 137s Sampling · Step 16 / 20 | Denoising evaluation 16 of 19 · Step 16 / 20
+[ui] 143s Sampling · Step 17 / 20 | Denoising evaluation 17 of 19 · Step 17 / 20
+[ui] 148s Saving result | Denoiser released; starting fresh GPU video decode and NVENC mux · Step 20 / 20
+[ui] 175s Idle | 
+[shot] evidence/ui/p3-04-h3-after.png
+[ui] visible videos ["http://127.0.0.1:7811/out/video-0018/video.mp4","http://127.0.0.1:7811/out/video-0018/video.mp4#t=0.1","http://127.0.0.1:7811/out/video-0018/video.mp4#t=0.1","http://127.0.0.1:7811/out/video-0017/video.mp4#t=0.1"] imgs ["http://127.0.0.1:7811/out/grid-0012.png","http://127.0.0.1:7811/out/job-0011.png","http://127.0.0.1:7811/out/job-0010.png"]
+RESULT {"wall_s":178,"videos":["http://127.0.0.1:7811/out/video-0018/video.mp4","http://127.0.0.1:7811/out/video-0018/video.mp4#t=0.1","http://127.0.0.1:7811/out/video-0018/video.mp4#t=0.1","http://127.0.0.1:7811/out/video-0017/video.mp4#t=0.1"],"activity":"Idle | "}

@@ -1,0 +1,1 @@
+PROGRAM path=evidence/p3/prep-short/h3-832x480x124-t35-tables2-exact-cudnn.difir video_tokens=14430 audio_tokens=414 text_tokens=35 layers=50 refiner_layers=2 constant_residency=streamed attention=cudnn fingerprint=f65d08a49a5c1da6e19e3db62d9a4d76f6871699e6b88d37016fafe073daf6dd

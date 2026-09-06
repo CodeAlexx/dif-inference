@@ -1,0 +1,14 @@
+# Generated run outputs (images, video, latents, per-job compiler artifacts).
+output/
+
+# Rust build tree.
+serenity-server/target/
+
+# Large binary artifacts are never committed; evidence keeps reports, logs and stills.
+*.safetensors
+*.diftensor
+*.difir
+*.difbind
+*.rgb
+*.mp4
+*.db

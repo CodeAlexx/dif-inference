@@ -1,0 +1,9 @@
+[ui] model flux-2-klein-base-9b | flux2 · Diffusion Compiler · admitted
+[shot] evidence/ui/p2-06-grid-form.png
+[ui] grid status Grid running… one job per cell; watch the Queue tab.
+[ui] grid status Grid running… one job per cell; watch the Queue tab.
+[ui] grid status Grid running… one job per cell; watch the Queue tab.
+[ui] final grid-0012 done in 86s · 4 cells · grid-0012.png
+[shot] evidence/ui/p2-07-grid-result.png
+[ui] preview http://127.0.0.1:7811/out/grid-0012.png?t=1788627861936 760x742
+RESULT null

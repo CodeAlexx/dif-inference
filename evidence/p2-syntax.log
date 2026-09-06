@@ -1,0 +1,5 @@
+[ui] model flux-2-klein-base-9b | flux2 · Diffusion Compiler · admitted
+[ui] note  display none
+[ui] job job-0007 done prompt= a glowing (paper lantern:1.2) on a rope pier at dusk, calm water | prompt_raw= a glowing (paper lantern:1.2) on a <random:wooden|stone|rope> pier at dusk, calm water
+[shot] evidence/ui/p2-05-syntax.png
+RESULT null

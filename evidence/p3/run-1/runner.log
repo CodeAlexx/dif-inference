@@ -1,0 +1,173 @@
+[difc-h3] geometry 832x480x124 latent 37x30x52 video_rows=14430 audio_latents=207 audio_rows=414 steps=20 seed=4242 quant=int8
+[difc-h3] phase=tokenize
+{
+  "prompt_bytes": 154,
+  "token_count": 35,
+  "valid_token_count": 35,
+  "ids_sha256": "14bf568441477f82483583d0040090e9e9fbc066568df48107c3cbc260b2781a",
+  "id_space": 151676,
+  "added_tokens": 33,
+  "first_ids": [32,9104,291,7640,4753,296,1412,264],
+  "last_ids": [819,323,264,28727,30249,50884,10362,13]
+}
+[difc-h3] text_tokens=35
+[difc-h3] phase=prepare conditioner program (sequence 35) + rebind
+[difc-h3] phase=conditioning
+CUDA_LINEAR_PLAN_CLASS operation=4 key=bf16|m=35|n=8192|k=5120|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=5 key=bf16|m=35|n=1024|k=5120|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=25 split_k=5 reduction=4 workspace=358400
+CUDA_LINEAR_PLAN_CLASS operation=10 key=bf16|m=35|n=5120|k=8192|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=18 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=13 key=bf16|m=35|n=25600|k=5120|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=18 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=17 key=bf16|m=35|n=5120|k=25600|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=2 reduction=4 workspace=716800
+CUDA_LINEAR_PLAN_POOL operations=350 unique=5 reused=345 isolated=0
+CONDITIONING PASS backend=cuda-nvrtc-cublaslt-cudnn tokens=35 shape=[35,5120] payload_sha256=45720e433311f62254a686475d86127e4d1cf42e4ed6a67787134911bad10c04 prepare_ms=1566.79 run_ms=68075.9 wall_s=70.0768 resident_bytes=1991254272
+[difc-h3] REAL conditioning: done tokens=35
+[difc-h3] phase=prepare denoiser program + rebind
+[difc-h3] phase=noise
+NOISE_WRITTEN video-noise.diftensor rows=14430 cols=96 seed=4242 rng=serenity layout=flat skip_normal_values=0 payload_sha256=99d183335004f665da35890af39cad2271a2dca03f797fa76093b7f516f05939
+NOISE_WRITTEN audio-noise.diftensor rows=414 cols=32 seed=4243 rng=serenity layout=flat skip_normal_values=0 payload_sha256=7ca4cd18da69390bda705e187d2449d1d63d43884a57d138be9a4370b48dcf96
+[difc-h3] modcache: HIT /home/alex/.serenity/models/checkpoints/MiniMax-H3/FL2VA/serenity_runtime_cache_v1/modcache_steps_20_blocks_50.safetensors
+[difc-h3] route=convrot-int8 resident_layers=28 exact cuDNN attention
+[difc-h3] phase=denoise start
+CUDA_MEMORY_PLAN tensor_bytes=1884727040 linear_workspace_bytes=67108864 parallel_linear_workspace_bytes=0 attention_workspace_bytes=0 materialized_f32_attention_score_bytes=0 ck_attention_scratch_bytes=0 h3_w8a8_weight_bytes=11182266368 h3_w8a8_scratch_bytes=256209920 h3_w8a8_tail_weight_bytes=385595392 h3_w8a8_tail_stage_half_bytes=231347200 convrot_int8_bytes=0 h3_groupwise_bytes=0 h3_modulation_bytes=368535552 promoted_streamed_constant_bytes=1075200 repeated_invariant_cache_bytes=376320 h3_convrot_correction_bytes=0 required_bytes=13760299264 free_before_bytes=16011624448 minimum_free_bytes=805306368
+CUDA_MEMORY_SLOT id=17 bytes=310302720
+CUDA_MEMORY_SLOT id=18 bytes=155151360
+CUDA_MEMORY_SLOT id=21 bytes=231211008
+CUDA_MEMORY_SLOT id=22 bytes=77070336
+CUDA_MEMORY_SLOT id=23 bytes=77070336
+CUDA_MEMORY_SLOT id=24 bytes=213305344
+CUDA_MEMORY_SLOT id=25 bytes=213305344
+CUDA_MEMORY_SLOT id=26 bytes=213305344
+CUDA_MEMORY_SLOT id=27 bytes=319958016
+STREAMED_PREFETCH_PLAN tensors=233 bytes_per_iteration=1666522688 direct_io=1 warm_page_cache=1
+STREAMED_PREFETCH_TENSOR id=33 bytes=308281344 first_operation=16
+STREAMED_PREFETCH_TENSOR id=32 bytes=77070336 first_operation=13
+STREAMED_PREFETCH_TENSOR id=29 bytes=231211008 first_operation=6
+STREAMED_PREFETCH_TENSOR id=34 bytes=154140672 first_operation=18
+STREAMED_PREFETCH_TENSOR id=54 bytes=231211008 first_operation=21
+STREAMED_PREFETCH_TENSOR id=57 bytes=77070336 first_operation=28
+STREAMED_PREFETCH_TENSOR id=58 bytes=308281344 first_operation=31
+STREAMED_PREFETCH_TENSOR id=59 bytes=154140672 first_operation=33
+CUDA_LINEAR_PLAN_CLASS operation=5 key=bf16|m=35|n=5376|k=5120|bias=1|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=18 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=8 key=bf16|m=35|n=7168|k=5376|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=3 reduction=1 workspace=224
+CUDA_LINEAR_PLAN_CLASS operation=14 key=bf16|m=35|n=5376|k=7168|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=18 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=17 key=bf16|m=35|n=28672|k=5376|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=15 stages=12 split_k=1 reduction=0 workspace=0
+CUDA_LINEAR_PLAN_CLASS operation=19 key=bf16|m=35|n=5376|k=14336|bias=0|bias_mode=1|implementation=1|workspace=67108864|persist=0 algorithm=21 tile=18 stages=15 split_k=2 reduction=4 workspace=752640
+CUDA_LINEAR_PLAN_POOL operations=19 unique=11 reused=8 isolated=6
+STREAMED_COPY_PROFILE tensors=233 bytes=1666522688
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1983 cublaslt_matmuls=19 cublas_gemms=0 cudnn_attention=52 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=645 h2d_bytes=20952780312 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2633 stream_wait_events=355 host_event_syncs=323 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=0 video_t=0 audio_t=0 denoiser_ms=14459.8 text_refiner_cache=miss
+[difc-h3] phase=denoise step=1 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=1 video_t=0.00460827 audio_t=0.0181817 denoiser_ms=5468.56 text_refiner_cache=hit
+[difc-h3] phase=denoise step=2 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=2 video_t=0.0097087 audio_t=0.0377358 denoiser_ms=4880.67 text_refiner_cache=hit
+[difc-h3] phase=denoise step=3 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=3 video_t=0.0153847 audio_t=0.0588236 denoiser_ms=4889.84 text_refiner_cache=hit
+[difc-h3] phase=denoise step=4 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=4 video_t=0.0217391 audio_t=0.0816326 denoiser_ms=4893.27 text_refiner_cache=hit
+[difc-h3] phase=denoise step=5 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=5 video_t=0.0289018 audio_t=0.106383 denoiser_ms=4894.22 text_refiner_cache=hit
+[difc-h3] phase=denoise step=6 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=6 video_t=0.037037 audio_t=0.133333 denoiser_ms=4894.9 text_refiner_cache=hit
+[difc-h3] phase=denoise step=7 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=7 video_t=0.0463576 audio_t=0.162791 denoiser_ms=4892.27 text_refiner_cache=hit
+[difc-h3] phase=denoise step=8 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=8 video_t=0.0571429 audio_t=0.195122 denoiser_ms=4890.45 text_refiner_cache=hit
+[difc-h3] phase=denoise step=9 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=9 video_t=0.0697675 audio_t=0.230769 denoiser_ms=4892.59 text_refiner_cache=hit
+[difc-h3] phase=denoise step=10 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=10 video_t=0.0847458 audio_t=0.27027 denoiser_ms=4889.63 text_refiner_cache=hit
+[difc-h3] phase=denoise step=11 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=11 video_t=0.102804 audio_t=0.314286 denoiser_ms=4894.12 text_refiner_cache=hit
+[difc-h3] phase=denoise step=12 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=12 video_t=0.125 audio_t=0.363636 denoiser_ms=4892.87 text_refiner_cache=hit
+[difc-h3] phase=denoise step=13 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=13 video_t=0.152941 audio_t=0.419355 denoiser_ms=4891.1 text_refiner_cache=hit
+[difc-h3] phase=denoise step=14 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=14 video_t=0.189189 audio_t=0.482759 denoiser_ms=4890.1 text_refiner_cache=hit
+[difc-h3] phase=denoise step=15 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=15 video_t=0.238095 audio_t=0.555556 denoiser_ms=4887.58 text_refiner_cache=hit
+[difc-h3] phase=denoise step=16 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=16 video_t=0.307692 audio_t=0.64 denoiser_ms=4895.94 text_refiner_cache=hit
+[difc-h3] phase=denoise step=17 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=17 video_t=0.414634 audio_t=0.73913 denoiser_ms=4897.38 text_refiner_cache=hit
+[difc-h3] phase=denoise step=18 total=19
+STREAMED_COPY_PROFILE tensors=114 bytes=68924992
+CUDA_LAUNCH_TELEMETRY phase=prepare kernel_launches=0 cublaslt_matmuls=0 cublas_gemms=0 cudnn_attention=0 cudnn_convolution=0 cutlass=0 ck_attention=0 h2d_copies=51 h2d_bytes=368535552 d2h_copies=0 d2h_bytes=0 d2d_copies=0 d2d_bytes=0 event_records=0 stream_wait_events=0 host_event_syncs=0 host_stream_syncs=1 device_mem_allocs=1 pinned_mem_allocs=3
+CUDA_LAUNCH_TELEMETRY phase=run kernel_launches=1966 cublaslt_matmuls=6 cublas_gemms=0 cudnn_attention=50 cudnn_convolution=0 cutlass=1200 ck_attention=0 h2d_copies=302 h2d_bytes=8558511640 d2h_copies=2 d2h_bytes=5594112 d2d_copies=1 d2d_bytes=376320 event_records=2039 stream_wait_events=220 host_event_syncs=153 host_stream_syncs=2 device_mem_allocs=0 pinned_mem_allocs=0
+H3_STEP index=18 video_t=0.6 audio_t=0.857143 denoiser_ms=4891.35 text_refiner_cache=hit
+[difc-h3] phase=denoise step=19 total=19
+H3_PROFILE_OP rank=1 operation=843 opcode=linear total_ms=1175.477 cold_ms=121.577 hot_mean_ms=58.550
+H3_PROFILE_OP rank=2 operation=278 opcode=attention total_ms=1051.440 cold_ms=53.772 hot_mean_ms=55.426
+H3_PROFILE_OP rank=3 operation=176 opcode=attention total_ms=1051.392 cold_ms=53.845 hot_mean_ms=55.419
+H3_PROFILE_OP rank=4 operation=295 opcode=attention total_ms=1051.194 cold_ms=53.771 hot_mean_ms=55.412
+H3_PROFILE_OP rank=5 operation=397 opcode=attention total_ms=1051.346 cold_ms=53.999 hot_mean_ms=55.408
+H3_PROFILE_OP rank=6 operation=380 opcode=attention total_ms=1050.833 cold_ms=53.874 hot_mean_ms=55.387
+H3_PROFILE_OP rank=7 operation=210 opcode=attention total_ms=1050.358 cold_ms=53.513 hot_mean_ms=55.380
+H3_PROFILE_OP rank=8 operation=312 opcode=attention total_ms=1050.383 cold_ms=53.807 hot_mean_ms=55.365
+H3_PROFILE_OP rank=9 operation=346 opcode=attention total_ms=1050.055 cold_ms=53.621 hot_mean_ms=55.357
+H3_PROFILE_OP rank=10 operation=261 opcode=attention total_ms=1050.250 cold_ms=53.889 hot_mean_ms=55.353
+H3_PROFILE_OP rank=11 operation=193 opcode=attention total_ms=1049.859 cold_ms=53.548 hot_mean_ms=55.351
+H3_PROFILE_OP rank=12 operation=244 opcode=attention total_ms=1049.542 cold_ms=53.549 hot_mean_ms=55.333
+H3_PROFILE_OP rank=13 operation=329 opcode=attention total_ms=1049.457 cold_ms=53.478 hot_mean_ms=55.332
+H3_PROFILE_OP rank=14 operation=414 opcode=attention total_ms=1049.463 cold_ms=53.625 hot_mean_ms=55.324
+H3_PROFILE_OP rank=15 operation=159 opcode=attention total_ms=1048.916 cold_ms=53.554 hot_mean_ms=55.298
+H3_PROFILE_OP rank=16 operation=431 opcode=attention total_ms=1048.800 cold_ms=53.451 hot_mean_ms=55.297
+H3_PROFILE_OP rank=17 operation=363 opcode=attention total_ms=1048.540 cold_ms=53.462 hot_mean_ms=55.282
+H3_PROFILE_OP rank=18 operation=448 opcode=attention total_ms=1048.434 cold_ms=53.490 hot_mean_ms=55.275
+H3_PROFILE_OP rank=19 operation=227 opcode=attention total_ms=1048.302 cold_ms=53.470 hot_mean_ms=55.268
+H3_PROFILE_OP rank=20 operation=482 opcode=attention total_ms=1048.332 cold_ms=53.675 hot_mean_ms=55.259
+H3_PROFILE input_io_ms=19.132 initial_layout_ms=0.170 denoiser_bundle_map_ms=6.105 denoiser_prepare_ms=2604.349 denoiser_device_ms=103086.665 denoiser_wall_ms=105989.585 denoiser_resident_weight_bytes=11551877120 denoiser_resident_prefault_ms=0.001 denoiser_resident_minor_faults=0 denoiser_resident_major_faults=0 denoiser_resident_h2d_ms=496.421 denoiser_resident_upload_ms=496.428 denoiser_resident_readahead_bytes=0 denoiser_resident_direct_read_bytes=19356839936 denoiser_streamed_direct_read_bytes=1666500736 denoiser_streamed_weight_bytes=174882717376 denoiser_streamed_host_stage_ms=23731.538 denoiser_streamed_host_wait_ms=46613.149 denoiser_streamed_h2d_ms=82.478 denoiser_non_kernel_device_ms=2152.587 denoiser_gpu_operation_ms=100934.078 denoiser_gpu_attention_ms=52035.954 denoiser_gpu_layout_ms=71.762 denoiser_gpu_dequant_ms=0.000 denoiser_gpu_other_ms=48826.363 denoiser_step_layout_ms=8.426 scheduler_update_ms=38.744 latent_handoff_ms=1.657 denoiser_output_io_ms=20.969 command_wall_ms=106032.125
+H3_DENOISE PASS backend=cuda-nvrtc-cublaslt-h3-convrot-int8-h3-int8-scaled-all-h3-compact-adaln-h3-modcache-repeat-cache-cudnn device="NVIDIA GeForce RTX 5080" schedule_points=20 model_evaluations=19 executed_evaluations=19 task=t2va sampler=euler sequence=14879 int8_attention_first_step=0 persistent_reuse=0 persistent_request=1 attention_class=exact_program_declared projection_class=approximate_native_h256_convrot_int8_gate h3_w8a8_mlps=50 h3_w8a8_attentions=50 h3_w8a8_resident_mlps=28 h3_w8a8_resident_attentions=28 h3_groupwise_blocks=0 h3_ck_attentions=0 h3_modulation_caches=51 repeated_invariant_ops=32 repeated_invariant_persistent_bytes=376320 repeated_invariant_cache_hits=18 resident_upload=lazy_first_use resident_host_pages=evict stage_threads=4 denoiser_kernel_sum_ms=103087 denoiser_wall_ms=105990 denoiser_resident_bytes=13760299264 denoiser_free_before_bytes=16011624448 denoiser_free_after_bytes=2231238656
+[difc-h3] phase=denoise complete

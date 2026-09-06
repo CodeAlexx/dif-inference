@@ -1,0 +1,26 @@
+{
+ "state": "done",
+ "artifact_path": "/home/alex/diffusion-compiler-ui/evidence/p3/run-1/video.mp4",
+ "engine": "diffusion-compiler",
+ "width": 832,
+ "height": 480,
+ "frames": 124,
+ "fps": 24,
+ "seed": 4242,
+ "steps": 20,
+ "quant": "int8",
+ "audio": "/home/alex/diffusion-compiler-ui/evidence/p3/run-1/audio.wav",
+ "conditioner_report": "/home/alex/diffusion-compiler-ui/evidence/p3/run-1/conditioner.json",
+ "media": {
+  "schema": "serenity.minimax_h3.result.v1",
+  "state": "done",
+  "artifact_path": "media/video.mp4",
+  "width": 832,
+  "height": 480,
+  "frames": 124,
+  "fps": 24,
+  "audio": true,
+  "video_encoder": "libx264",
+  "mux_ms": 713.958
+ }
+}

@@ -1,0 +1,10 @@
+[difc-h3] geometry 832x480x124 latent 37x30x52 video_rows=14430 audio_latents=207 audio_rows=414 steps=20 seed=4242 quant=int8
+[difc-h3] phase=decode video (tiled VAE)
+CUDA_LINEAR_PLAN_POOL operations=147 unique=147 reused=0 isolated=147
+H3_VAE_DECODE PASS backend=cuda-nvrtc-cublaslt-cudnn device="NVIDIA GeForce RTX 5080" latent=[1,24,37,30,52] decoded=[1,3,124,480,832] temporal_chunks=7 spatial_tiles=12 executions=84 prepare_ms=7517.12 kernel_sum_ms=8911.53 tile_extract_ms=3.58615 execution_wall_ms=9319.54 spatial_stitch_ms=503.525 temporal_assembly_ms=389.19 denormalize_ms=189.716 output_io_ms=4379.09 output_class=diagnostic-tensors wall_ms=15560.6 convrot_int8_linears=0 resident_bytes=5156074752 free_before=16011624448 free_after=10846339072 range=[0,0.986748] source_hash=da8b86685b6fdbdb3361580427301030a3e88e0d9c99a01e2328bfeb748072b2
+[difc-h3] phase=decode audio
+CUDA_LINEAR_PLAN_POOL operations=0 unique=0 reused=0 isolated=0
+AUDIO_DECODE PASS backend=cuda-nvrtc frames=207 samples_per_channel=165600 channels=2 nonfinite=0 wav=audio.wav
+[difc-h3] phase=mux
+H3_MEDIA PASS artifact="media/video.mp4" frames=124 geometry=832x480 input_fps=24 output_fps=24 audio_wav="audio.wav" encoder=libx264 mux_ms=713.958 range=[0,0.986748]
+[difc-h3] done /home/alex/diffusion-compiler-ui/evidence/p3/run-1/video.mp4

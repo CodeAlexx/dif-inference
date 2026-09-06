@@ -1,0 +1,12 @@
+{
+  "schema":"serenity.minimax_h3.result.v1",
+  "state":"done",
+  "artifact_path":"media/video.mp4",
+  "width":832,
+  "height":480,
+  "frames":124,
+  "fps":24,
+  "audio":true,
+  "video_encoder":"libx264",
+  "mux_ms":713.958
+}

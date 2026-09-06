@@ -1,0 +1,12 @@
+await sleep(2500);
+log('title', document.title);
+const tabs = [...document.querySelectorAll('[data-tab],[role=tab],nav button,.tab,.tabs button')].map(e => (e.dataset.tab || e.textContent.trim()).slice(0,30));
+log('tabs', tabs);
+const selects = [...document.querySelectorAll('select')].map(s => ({id: s.id || s.name || s.className.slice(0,40), n: s.options.length, opts: [...s.options].slice(0,6).map(o=>o.textContent.trim().slice(0,40))}));
+log('selects', selects);
+const inputs = [...document.querySelectorAll('input,textarea')].filter(e => e.offsetParent).map(e => ({id: e.id || e.name || e.placeholder || e.className.slice(0,30), type: e.type, value: String(e.value).slice(0,30)}));
+log('visible inputs', inputs.slice(0,60));
+const buttons = [...document.querySelectorAll('button')].filter(e => e.offsetParent).map(e => (e.id ? '#'+e.id+' ' : '') + e.textContent.trim().slice(0,25));
+log('visible buttons', buttons.slice(0,80));
+await shot('p2-01-landing');
+({ title: document.title, tabs: tabs.length, selects: selects.length });

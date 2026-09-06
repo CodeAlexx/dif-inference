@@ -1,0 +1,12 @@
+{
+  "source_commit": "db3984fbc6e13b34c0064990fc2d95ac64d00058",
+  "diffir_fingerprint": "09523661045963aba9ec908056a14d01bebe3a81b1bb7b6d16857900bc074348",
+  "checkpoint_tensors": 54,
+  "f32_to_bf16_parameters": 22,
+  "preparation_ms": 2121.0303220000001,
+  "execution_ms": 25.81395149230957,
+  "resident_bytes": 1413029632,
+  "boundaries": {
+
+  }
+}

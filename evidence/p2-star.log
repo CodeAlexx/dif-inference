@@ -1,0 +1,4 @@
+[ui] item found true
+[ui] glyph before/after ☆ ★ class gen-thumb-star starred
+RESULT {"afterFreshLoad":"☆","firstItemStarred":false}
+RESULT {"afterFreshLoad":"★","firstItemStarred":false}

@@ -1,0 +1,5 @@
+[ui] items 9 target found true
+[ui] star class before/after gen-thumb-star | gen-thumb-star
+[ui] gallery favorites persisted 0
+[ui] after reuse: seed 2026 steps 8 prompt a glowing (paper lantern:1.2) on a rope pier at dusk, calm w
+RESULT {"starToggled":false,"favoritesPersisted":0,"seed":"2026","steps":"8","prompt":"a glowing (paper lantern:1.2) on a rope pier at dusk, calm water"}

@@ -1,0 +1,25 @@
+POST /v1/video -> 202 {"schema": "serenity.video_job.v1", "video_id": "video-0017", "prompt_id": "video-0017", "model": "minimax_h3", "runner": "minimax_h3_mojo_request", "task": "t2va", "request_runner": "output/bin/minimax_h3_serenity_runtime", "profile": "runtime-832x480-5.167s-24fps", "backend": "mojo", "quant": "int8", "attention_backend": "cudnn", "step_cache": "exact", "state": "queued", "status_url": "/out/vide
+    0.0s {"state": "running", "phase": "conditioning_and_denoising", "step": 0, "total": 20, "message": "Starting MiniMax-H3 T2VA INT8 DiT with cudnn attention and exact step cache"}
+   39.0s {"state": "running", "phase": "denoise", "step": 0, "total": 20, "message": "Denoising evaluation 0 of 0"}
+   60.0s {"state": "running", "phase": "denoise", "step": 1, "total": 20, "message": "Denoising evaluation 1 of 19"}
+   66.0s {"state": "running", "phase": "denoise", "step": 2, "total": 20, "message": "Denoising evaluation 2 of 19"}
+   69.0s {"state": "running", "phase": "denoise", "step": 3, "total": 20, "message": "Denoising evaluation 3 of 19"}
+   75.0s {"state": "running", "phase": "denoise", "step": 4, "total": 20, "message": "Denoising evaluation 4 of 19"}
+   78.0s {"state": "running", "phase": "denoise", "step": 5, "total": 20, "message": "Denoising evaluation 5 of 19"}
+   84.1s {"state": "running", "phase": "denoise", "step": 6, "total": 20, "message": "Denoising evaluation 6 of 19"}
+   90.1s {"state": "running", "phase": "denoise", "step": 7, "total": 20, "message": "Denoising evaluation 7 of 19"}
+   93.1s {"state": "running", "phase": "denoise", "step": 8, "total": 20, "message": "Denoising evaluation 8 of 19"}
+   99.1s {"state": "running", "phase": "denoise", "step": 9, "total": 20, "message": "Denoising evaluation 9 of 19"}
+  105.1s {"state": "running", "phase": "denoise", "step": 10, "total": 20, "message": "Denoising evaluation 10 of 19"}
+  108.1s {"state": "running", "phase": "denoise", "step": 11, "total": 20, "message": "Denoising evaluation 11 of 19"}
+  114.1s {"state": "running", "phase": "denoise", "step": 12, "total": 20, "message": "Denoising evaluation 12 of 19"}
+  120.1s {"state": "running", "phase": "denoise", "step": 13, "total": 20, "message": "Denoising evaluation 13 of 19"}
+  123.1s {"state": "running", "phase": "denoise", "step": 14, "total": 20, "message": "Denoising evaluation 14 of 19"}
+  129.1s {"state": "running", "phase": "denoise", "step": 15, "total": 20, "message": "Denoising evaluation 15 of 19"}
+  135.1s {"state": "running", "phase": "denoise", "step": 16, "total": 20, "message": "Denoising evaluation 16 of 19"}
+  138.1s {"state": "running", "phase": "denoise", "step": 17, "total": 20, "message": "Denoising evaluation 17 of 19"}
+  144.1s {"state": "running", "phase": "decode", "step": 20, "total": 20, "message": "Denoiser released; starting fresh GPU video decode and NVENC mux"}
+  171.1s {"state": "done", "phase": "done", "step": 20, "total": 20, "message": "MiniMax-H3 synchronized video and audio ready"}
+FINAL {"schema": "serenity.minimax_h3.status.v1", "state": "done", "phase": "done", "step": 20, "total": 20, "message": "MiniMax-H3 synchronized video and audio ready"}
+wall 171.1s
+result.json 200 {"state": "done", "artifact_path": "/home/alex/diffusion-compiler-ui/output/run/video-0017/video.mp4", "engine": "diffusion-compiler", "width": 832, "height": 480, "frames": 124, "fps": 24, "seed": 777, "steps": 20, "quant": "int8", "audio": "/home/alex/diffusion-compiler-ui/output/run/video-0017/audio.wav", "conditioner_report": "/home/alex/diffusion-compiler-ui/output/run/video-0017/conditioner.json", "media": {"schema": "serenity.minimax_h3.result.v1", "state": "done", "artifact_path": "media/video.mp4", "width": 832, "height": 480, "frames": 124, "fps": 24, "audio": true, "video_encoder": "libx264", "mux_ms": 631.267}, "model": "minimax_h3", "runner": "minimax_h3_mojo_request", "attentio

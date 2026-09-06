@@ -1,0 +1,10 @@
+tokenize                         0.12 s
+text_tokens=35
+cond-program                     0.06 s
+cond-bundle                    184.37 s
+denoiser-program                 0.01 s
+denoiser-bundle                228.01 s
+-rw-rw-r-- 1 alex alex  58204 Sep  5 10:10 cond-s35.difbind
+-rw-rw-r-- 1 alex alex  81128 Sep  5 10:07 cond-s35.difir
+-rw-rw-r-- 1 alex alex  42376 Sep  5 10:14 h3-832x480x124-t35-tables2-exact-cudnn.difbind
+-rw-rw-r-- 1 alex alex 127140 Sep  5 10:10 h3-832x480x124-t35-tables2-exact-cudnn.difir

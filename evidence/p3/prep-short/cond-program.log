@@ -1,0 +1,1 @@
+CONDITIONER_PROGRAM path=evidence/p3/prep-short/cond-s35.difir fingerprint=78c5bbc802f80bccdcead2e759864931a0287a34af3643a5d89224891c499f66 sequence=35 layers=50 operations=802 linears=350 attentions=50 streamed_weights=551 input_id=1 output_id=1357 outputs=1 vision_tokens=0 family=h3
