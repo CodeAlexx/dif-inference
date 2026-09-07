@@ -26,6 +26,7 @@
       "some_pressure_percent": 20,
       "admission_pressure_percent": 5,
       "child_soft_fraction": 0.9,
+      "window_pressure_percent": 30,
       "startup_timeout_seconds": 15,
       "maximum_runtime_seconds": 3600
     },
@@ -332,7 +333,10 @@
       "task": "t2va",
       "seed": 0,
       "step_cache": "exact",
-      "step_cache_modes": ["exact", "high"],
+      "step_cache_modes": [
+        "exact",
+        "high"
+      ],
       "id": "minimax-h3-832x480x124-24fps",
       "width": 832,
       "height": 480,
@@ -368,7 +372,22 @@
       "tile_overlap": 64,
       "encoder": "libx264",
       "ffmpeg": "/usr/bin/ffmpeg",
-      "rgb_mux_args": ["-c:v", "${minimax_h3.decoder.encoder}", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "32000", "-ac", "2"]
+      "rgb_mux_args": [
+        "-c:v",
+        "${minimax_h3.decoder.encoder}",
+        "-preset",
+        "slow",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ar",
+        "32000",
+        "-ac",
+        "2"
+      ]
     },
     "warm_artifacts": [
       {

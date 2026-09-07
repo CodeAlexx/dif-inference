@@ -31,19 +31,38 @@
       "--cudnn-attention-heuristic",
       "a",
       "--resident-plan-mib",
-      "20000",
+      "22000",
       "--resident-order",
-      "first"
+      "first",
+      "--streamed-prefetch-depth",
+      "3",
+      "--streamed-staging-buffers",
+      "4",
+      "--streamed-stage-threads",
+      "3"
     ]
   },
   "minimax_h3": {
     "ck_attention_libraries": {
       "86": "${home}/Ck-INT8/native/lib/owned/sm86/libcodealexx_h3_dense.so"
     },
-    "task_configs": { "ref2va": "${repo}/config/h3-ref2va.json" },
-    "lora": { "enabled": true, "max_count": 4, "max_abs_scale": 10.0 },
+    "task_configs": {
+      "ref2va": "${repo}/config/h3-ref2va.json"
+    },
+    "lora": {
+      "enabled": true,
+      "max_count": 4,
+      "max_abs_scale": 10.0
+    },
     "motion": {
-      "save_context": true, "filename": "motion_context.safetensors", "windows": [5, 22, 39], "default_frames": 22,
+      "save_context": true,
+      "filename": "motion_context.safetensors",
+      "windows": [
+        5,
+        22,
+        39
+      ],
+      "default_frames": 22,
       "stage_script": "${repo}/scripts/h3-motion.sh",
       "modulation_cache": "${minimax_h3.keyframes.modulation_cache}",
       "timestep_tables": 3,
@@ -54,22 +73,49 @@
     "control": {
       "enabled": true,
       "ui_artifacts": [
-        {"type":"controlnet","name":"MiniMax-H3-Fun-Controlnet-Union.safetensors","path":"${minimax_h3.control.checkpoint}"},
-        {"type":"clip","name":"MiniMax-H3/FL2VA/text_encoder/serenity_int8_rowscale_v1","path":"${minimax_h3.checkpoint}/text_encoder/serenity_int8_rowscale_v1"},
-        {"type":"vae","name":"MiniMax-H3/FL2VA/video_vae/source/model.safetensors","path":"${minimax_h3.checkpoint}/video_vae/source/model.safetensors"},
-        {"type":"vae","name":"MiniMax-H3/FL2VA/audio_vae/model.safetensors","path":"${minimax_h3.checkpoint}/audio_vae/model.safetensors"}
+        {
+          "type": "controlnet",
+          "name": "MiniMax-H3-Fun-Controlnet-Union.safetensors",
+          "path": "${minimax_h3.control.checkpoint}"
+        },
+        {
+          "type": "clip",
+          "name": "MiniMax-H3/FL2VA/text_encoder/serenity_int8_rowscale_v1",
+          "path": "${minimax_h3.checkpoint}/text_encoder/serenity_int8_rowscale_v1"
+        },
+        {
+          "type": "vae",
+          "name": "MiniMax-H3/FL2VA/video_vae/source/model.safetensors",
+          "path": "${minimax_h3.checkpoint}/video_vae/source/model.safetensors"
+        },
+        {
+          "type": "vae",
+          "name": "MiniMax-H3/FL2VA/audio_vae/model.safetensors",
+          "path": "${minimax_h3.checkpoint}/audio_vae/model.safetensors"
+        }
       ],
       "stage_script": "${repo}/scripts/h3-controls.sh",
       "checkpoint": "${home}/.serenity/models/controlnets/MiniMax-H3-Fun-Controlnet-Union.safetensors",
       "max_count": 4,
       "input_policy": "mojo_resize_trim_hold_last",
       "media_program": "${repo}/serenity-server/target/release/h3-control-media",
-      "preprocessors": ["prepared", "canny"],
-      "resize_modes": ["crop", "pad", "stretch"],
+      "preprocessors": [
+        "prepared",
+        "canny"
+      ],
+      "resize_modes": [
+        "crop",
+        "pad",
+        "stretch"
+      ],
       "defaults": {
-        "preprocessor": "prepared", "resize_mode": "crop",
-        "canny_low": 100, "canny_high": 200,
-        "strength": 1.0, "start": 0.0, "end": 1.0,
+        "preprocessor": "prepared",
+        "resize_mode": "crop",
+        "canny_low": 100,
+        "canny_high": 200,
+        "strength": 1.0,
+        "start": 0.0,
+        "end": 1.0,
         "invert_mask": false
       },
       "ffmpeg": "/usr/bin/ffmpeg",
@@ -106,10 +152,21 @@
       "cublas": "${home}/mojodiffusion/.pixi/envs/default/lib/libcublas.so.13"
     },
     "profile": {
-      "tasks": ["t2va", "i2va", "l2va", "fl2va", "continue", "controlnet"]
+      "tasks": [
+        "t2va",
+        "i2va",
+        "l2va",
+        "fl2va",
+        "continue",
+        "controlnet"
+      ]
     },
     "keyframes": {
-      "required_tools": ["${compiler_build}/difh3vision", "${compiler_build}/difh3encode", "${compiler_build}/difh3state"],
+      "required_tools": [
+        "${compiler_build}/difh3vision",
+        "${compiler_build}/difh3encode",
+        "${compiler_build}/difh3state"
+      ],
       "input_policy": "exact_canvas_rgb_no_resize",
       "stage_script": "${repo}/scripts/h3-keyframes.sh",
       "vision_program": "${minimax_h3.prepared_source_root}/fl2va-t37-native/vision/qwen3vl-vision-t1h30w52.difir",

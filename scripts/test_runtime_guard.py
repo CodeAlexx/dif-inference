@@ -49,10 +49,24 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("pressure", Guard(POLICY,24*GIB,16*GIB).observe(s))
 
     def test_recent_stalls_cancel_before_ten_second_average_catches_up(self):
+        # 700000 over 2 s = 35%, above window_pressure_percent. The old fixture
+        # used 250000 (12.5%), which a healthy streamed render exceeds on its
+        # own: video-0063 measured a 14.93% worst 2 s window while avg10 stayed
+        # at 1.15% and the child held 10.39 GB of a 44 GB cap. The property
+        # under test -- a burst cancels before avg10 catches up -- is unchanged.
         guard = Guard(POLICY,24*GIB,16*GIB)
         self.assertIsNone(guard.observe(sample(0)))
-        s = sample(2); s["pressure"]["parent"]["full"]["total"] = 250000
+        s = sample(2); s["pressure"]["parent"]["full"]["total"] = 700000
         self.assertIn("stalls", guard.observe(s))
+
+    def test_streamed_read_burst_below_window_threshold_does_not_cancel(self):
+        # Regression for four cancelled H3 renders (video-0051/0061/0062/0063):
+        # ordinary streamed-checkpoint I/O produces ~15% over 2 s with no
+        # scarcity at all. Recorded from telemetry 20260907-021450.
+        guard = Guard(POLICY,24*GIB,16*GIB)
+        self.assertIsNone(guard.observe(sample(0)))
+        s = sample(2); s["pressure"]["parent"]["full"]["total"] = 298600
+        self.assertIsNone(guard.observe(s))
 
     def test_short_stall_does_not_accumulate_forever(self):
         guard = Guard(POLICY,24*GIB,16*GIB)

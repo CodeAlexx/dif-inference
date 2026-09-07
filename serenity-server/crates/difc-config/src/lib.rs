@@ -153,14 +153,8 @@ pub fn h3_contract(doc: &Value, request: &Value) -> Result<(), String> {
     let doc = &selected;
     let profile = get(doc, "minimax_h3.profile")?;
     for key in ["width", "height", "frames", "fps", "steps"] {
-        // The dedicated Mojo ControlNet screen authors runtime geometry.
-        // Its existing server validator checks the native ranges/alignment.
-        if task == "controlnet" && key != "fps" {
-            if request[key].as_i64().is_none_or(|n| n <= 0) {
-                return Err(format!("H3 ControlNet {key} must be a positive integer"));
-            }
-            continue;
-        }
+        // Continuation frames are derived from the overlap window, so that rule
+        // runs before the generic geometry check below.
         if key == "frames" && task == "continue" {
             let overlap = request["motion_context_frames"].as_i64().ok_or("H3 continuation needs a numeric overlap")?;
             if !doc["minimax_h3"]["motion"]["windows"].as_array().is_some_and(|a| a.contains(&serde_json::json!(overlap))) {
@@ -170,6 +164,22 @@ pub fn h3_contract(doc: &Value, request: &Value) -> Result<(), String> {
             if !(5..=39).contains(&overlap) { return Err("Unsupported H3 native motion overlap".into()); }
             let expected = ((frames + overlap - 5 + 16) / 17) * 17 + 5;
             if request[key].as_i64() != Some(expected) { return Err(format!("H3 continuation frames must be {expected}")); }
+            continue;
+        }
+        // Geometry is authored per request, not sealed to the fixture profile.
+        // The denoiser program and bundle are rebuilt per request from the actual
+        // row counts, the video VAE decodes through the tiled program, and audio
+        // is geometry-independent. ControlNet was already exempt here and has
+        // been rendering off profile (video-0044 / video-0051 both decoded
+        // 1344x768x120 through this same chain); sealing every other task meant
+        // H3 Studio could only ever queue the fixture shape.
+        //
+        // FPS stays sealed: output framing and the 17-frame internal alignment
+        // are derived from it.
+        if key != "fps" {
+            if request[key].as_i64().is_none_or(|n| n <= 0) {
+                return Err(format!("H3 {key} must be a positive integer"));
+            }
             continue;
         }
         if request[key].as_i64().is_none() || request[key] != profile[key] {
@@ -496,15 +506,31 @@ mod tests {
         assert!(image_profile_in(&doc, "sd_xl_base_1.0").is_none());
         let mut request = doc["minimax_h3"]["profile"].clone();
         assert!(h3_contract(&doc, &request).is_ok());
+        // Geometry is authored per request: an off-profile frame count is
+        // admitted, and only a non-positive one is refused. The runtime
+        // geometry check and the runner still verify the 17-frame alignment.
         request["frames"] = json!(73);
+        assert!(h3_contract(&doc, &request).is_ok());
+        request["frames"] = json!(0);
         assert!(h3_contract(&doc, &request).unwrap_err().contains("frames"));
-        doc["minimax_h3"]["profile"]["frames"] = json!(73);
+        request["frames"] = json!(124);
+        // FPS stays sealed: output framing and internal alignment derive from it.
+        request["fps"] = json!(30);
+        assert!(h3_contract(&doc, &request).unwrap_err().contains("fps"));
+        request["fps"] = doc["minimax_h3"]["profile"]["fps"].clone();
         assert!(h3_contract(&doc, &request).is_ok());
         doc["minimax_h3"]["profile"]["tasks"] = json!(["t2va"]);
         request["task"] = json!("fl2va"); assert!(h3_contract(&doc, &request).is_err());
         doc["minimax_h3"]["profile"]["tasks"] = json!(["t2va", "fl2va"]);
         assert!(h3_contract(&doc, &request).is_ok());
-        request["task"] = json!("ref2va"); assert!(h3_contract(&doc, &request).is_err());
+        // Ref2VA routes to its own task config (config/h3-ref2va.json), which
+        // declares tasks:["ref2va"], so it is admitted regardless of the base
+        // profile's task list. This previously read as an error only because
+        // that document carries no geometry and the sealed comparison failed on
+        // a null -- an incidental pass, not the task-gating this test names.
+        request["task"] = json!("ref2va"); assert!(h3_contract(&doc, &request).is_ok());
+        // A task with no config of its own and not in profile.tasks is refused.
+        request["task"] = json!("i2va"); assert!(h3_contract(&doc, &request).is_err());
     }
     #[test] fn h3_step_cache_modes_are_opt_in_with_exact_default() {
         let mut doc = load(&repository_root().join("config/difc.json"), &repository_root()).unwrap();

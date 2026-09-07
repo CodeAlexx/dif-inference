@@ -39,7 +39,21 @@ MEM_MAX="${MEM_MAX:-24G}"
 MEM_HIGH="${MEM_HIGH:-infinity}"
 SWAP_MAX="${SWAP_MAX:-2G}"
 DESKTOP_RESERVE="${DESKTOP_RESERVE:-16G}"
-RUNTIME_MAX="24G"
+# Static ceiling on the per-job cgroup cap. This is a backstop only: the two
+# gates below already refuse dynamically against live MemAvailable and the
+# desktop reserve, and the guard policy admits separately, so a job can never
+# actually take memory the host does not have at that moment.
+#
+# 24G was too low for image work and was silently costing wall time rather than
+# protecting anything. cgroup-v2 charges page cache to the reading cgroup, so a
+# FLUX.2 klein 9B job holding ~20 GB of device-staging plus an 18.16 GB
+# checkpoint read exceeds 24G and the kernel reclaims the very pages it is
+# reading. Measured on this box, identical binary and flags, warm cache:
+#   unwrapped            75.0 s total, 20.6 s resident upload
+#   wrapped MemoryMax=24G 163.9 s total, 109.5 s resident upload
+# 62 GB host minus the 16G desktop reserve leaves 46G, so 44G keeps the reserve
+# intact while letting an 18 GB checkpoint and its staging coexist.
+RUNTIME_MAX="${RUNTIME_MAX:-44G}"
 
 if [[ $# -lt 1 ]]; then
   echo "mem_safe_runtime: usage: $0 <program> [args...]" >&2

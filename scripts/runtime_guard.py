@@ -25,6 +25,18 @@ class Policy:
     some_pressure_percent: float
     admission_pressure_percent: float
     child_soft_fraction: float
+    # Threshold for the short-window stall rule below. It needs its own number:
+    # that rule divides a stall delta by a 2 s window, while full/some_pressure
+    # are the kernel's own 10 s averages, so reusing the avg10 threshold made it
+    # about five times more sensitive than intended and it fired on ordinary
+    # streamed-read bursts. Measured on a healthy H3 render (video-0063,
+    # telemetry 20260907-021450): worst 2 s window 14.93% host / 14.88% session
+    # / 14.69% child, while avg10 peaked at 1.15% / 2.40% / 0.00% and the child
+    # held 10.39 GB of a 44 GB cap with 55.1 GB still available. Sustained
+    # pressure is still caught by the avg10 rule at full_pressure_percent, which
+    # is what the recorded incident (avg10 55.63%) trips, and systemd-oomd's own
+    # ManagedOOMMemoryPressureLimit is a sustained some_pressure_percent.
+    window_pressure_percent: float
     startup_timeout_seconds: float
     maximum_runtime_seconds: float
 
@@ -43,6 +55,7 @@ class Policy:
                 result.full_pressure_percent < result.some_pressure_percent <= 25 and
                 result.admission_pressure_percent <= result.full_pressure_percent and
                 0.5 <= result.child_soft_fraction <= 0.95 and
+                result.some_pressure_percent <= result.window_pressure_percent <= 60 and
                 result.startup_timeout_seconds <= 30):
             raise ValueError("Memory guard thresholds outside safe bounds")
         return result, raw
@@ -142,8 +155,8 @@ class Guard:
             for source, kinds in sample["pressure"].items():
                 if source not in first["pressure"]:
                     continue
-                for kind, limit in [("full", self.policy.full_pressure_percent),
-                                    ("some", self.policy.some_pressure_percent)]:
+                for kind in ("full", "some"):
+                    limit = self.policy.window_pressure_percent
                     delta = kinds[kind]["total"] - first["pressure"][source][kind]["total"]
                     if delta < 0:
                         return "memory pressure counter reset during execution"

@@ -264,7 +264,9 @@ audio.h3s-ref-preview { height: 36px; }
     scrollbar-color: var(--h3-line-hot) transparent;
 }
 .h3s-spine-shot {
-    position: relative; flex: 0 0 clamp(130px, 14vw, 210px); min-width: 0; padding: 11px 10px 8px;
+    /* flex-basis is set inline per shot from its duration; this is the floor so
+       a 5 s clip still shows its title. */
+    position: relative; flex: 0 0 auto; min-width: 118px; padding: 11px 10px 8px;
     border: 1px solid var(--h3-line); border-radius: 3px; background: #171c1d; cursor: pointer; color: var(--h3-muted);
 }
 .h3s-spine-shot::before, .h3s-spine-shot::after {

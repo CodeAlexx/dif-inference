@@ -246,13 +246,28 @@ print(max(0, min($RESIDENT, (free - reserve - base) // per_block)))
   fi
 fi
 
-# Admitted product geometry: the frozen 832x480x124 contract whose decoder,
-# audio and modulation programs are sealed in the fixture. Others fail loud.
-if [[ "$TASK" != controlnet && ( "$W" != "$(jq_get minimax_h3.profile.width)" || "$H" != "$(jq_get minimax_h3.profile.height)" || "$FRAMES" != "$EXPECTED_FRAMES" || "$FPS" != "$(jq_get minimax_h3.profile.fps)" ) ]]; then
-  echo "FATAL geometry ${W}x${H}x${FRAMES} not admitted by the compiler chain yet; see minimax_h3.profile in $DIFC_CONFIG" >&2; exit 65
+# Geometry is NOT frozen to the fixture profile. The denoiser program and its
+# bundle are rebuilt per request from the actual row counts (difc
+# make-h3-denoiser + difweights rebind-h3-denoiser-bundle below), the video VAE
+# decodes through the tiled program, and audio is geometry-independent. Only the
+# sealed modulation cache is profile-shaped, and that is handled directly below.
+#
+# ControlNet was already exempt from the old gate and has been rendering off
+# profile: video-0044 and video-0051 both decoded 1344x768x120 through this same
+# chain. The gate was blocking every other task for a constraint the chain does
+# not actually have, which is why H3 Studio could only ever queue 832x480.
+# FPS still has to match: output framing and the 17-frame internal alignment
+# are derived from it.
+if [[ "$FPS" != "$(jq_get minimax_h3.profile.fps)" ]]; then
+  echo "FATAL fps $FPS is not the configured delivery rate; see minimax_h3.profile in $DIFC_CONFIG" >&2; exit 65
 fi
-if [[ ( "$TASK" != controlnet && "$STEPS" != "$(jq_get minimax_h3.profile.steps)" ) || "$BLOCKS" != "$(jq_get minimax_h3.profile.blocks)" ]]; then
-  echo "FATAL steps=$STEPS not admitted: steps/blocks must match minimax_h3.profile" >&2; exit 65
+# Step count is authored per request. Only the denoiser block count is a
+# property of the built program and must still match the profile.
+if [[ "$BLOCKS" != "$(jq_get minimax_h3.profile.blocks)" ]]; then
+  echo "FATAL blocks=$BLOCKS not admitted: blocks must match minimax_h3.profile" >&2; exit 65
+fi
+if (( STEPS < 2 || STEPS > 50 )); then
+  echo "FATAL steps=$STEPS is outside the admitted 2 through 50 range" >&2; exit 65
 fi
 if [[ "$TASK" == controlnet ]]; then
   (( FPS == 24 && OUT_FPS == FPS && OUT_FRAMES >= 120 && OUT_FRAMES <= 360 && OUT_FRAMES % FPS == 0 &&
@@ -260,12 +275,24 @@ if [[ "$TASK" == controlnet ]]; then
     echo 'FATAL ControlNet requires native 5 through 15 whole seconds and 2 through 50 steps' >&2; exit 65;
   }
 else
-  [[ "$OUT_FRAMES" == "$(jq_get minimax_h3.profile.frames)" && "$OUT_FPS" == "$FPS" ]] || { echo 'FATAL output must match configured delivery frames/FPS' >&2; exit 65; }
+  # Delivery length is authored per request, so what has to hold is internal
+  # consistency, not equality with the fixture: the pass must generate exactly
+  # the 17-aligned frame count that covers the delivered frames plus any
+  # continuation overlap, at the model's own rate (no resampling exists).
+  (( OUT_FPS == FPS && OUT_FRAMES >= 1 &&
+     FRAMES == (OUT_FRAMES + MOTION_FRAMES - 5 + 16) / 17 * 17 + 5 )) || {
+    echo "FATAL delivery of $OUT_FRAMES frames at $OUT_FPS fps is inconsistent with this ${FRAMES}-frame pass (overlap $MOTION_FRAMES)" >&2; exit 65;
+  }
 fi
 jq -e --arg quant "$QUANT" '.minimax_h3.profile.quant_modes | index($quant) != null' <<<"$DIFC_DOCUMENT" >/dev/null || { echo "FATAL unsupported quant=$QUANT" >&2; exit 65; }
 "$DIFC_CONFIG_TOOL" check-h3 "$QUANT" --task "$TASK" || exit 66
 MODCACHE="$(jq_get minimax_h3.modulation_cache)"
-if [[ "$TASK" == controlnet && "$STEPS" != "$(jq_get minimax_h3.profile.steps)" ]]; then
+# The sealed modulation cache is shaped by the profile's schedule AND geometry.
+# Any request that departs from either computes modulation online instead.
+if [[ "$STEPS" != "$(jq_get minimax_h3.profile.steps)" \
+   || "$W" != "$(jq_get minimax_h3.profile.width)" \
+   || "$H" != "$(jq_get minimax_h3.profile.height)" \
+   || "$FRAMES" != "$EXPECTED_FRAMES" ]]; then
   MODCACHE="" # Existing native online modulation uses the requested schedule.
 fi
 TIMESTEP_TABLES="$(jq_get minimax_h3.profile.timestep_tables)"

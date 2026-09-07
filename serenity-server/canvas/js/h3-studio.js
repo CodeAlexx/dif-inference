@@ -140,6 +140,7 @@ var H3StudioTab = (function () {
             '<button class="h3s-btn is-quiet" data-h3-action="import-project">Import</button>' +
             '<button class="h3s-btn" data-h3-action="export-project">Export project</button>' +
             '<button class="h3s-btn" data-h3-action="export-edit">Export edit</button>' +
+            '<button class="h3s-btn is-primary" data-h3-action="open-in-editor">Open in Video Editor</button>' +
             '</div></header>';
     }
 
@@ -170,6 +171,34 @@ var H3StudioTab = (function () {
             if (c) { c.ref_path = data.path || data.name || ''; c.ref_url = data.url || data.path || ''; }
             saveProject('Portrait set'); setStatus('Portrait set', ''); render();
         }).catch(function (error) { setStatus('Portrait upload failed: ' + error.message, 'error'); });
+    }
+
+    // Native window.confirm() blocks the renderer entirely: no script runs, no
+    // automation can reach the page, and the tab is frozen until a human clicks.
+    // That froze the browser mid-session and is unusable for headless driving.
+    // Keep the explicit consent, drop the blocking dialog: the first click arms
+    // the action and says so, a second click within the window commits. Any other
+    // action, or the timeout, disarms it.
+    // Non-blocking replacement for window.confirm, which froze the tab.
+    // The window has to outlast a real person reading the message and moving
+    // the mouse back to the button, so it is 30s, not a few seconds.
+    var ARMED_WINDOW_MS = 30000;
+    var armedActions = {};
+    function armedConfirm(key, message) {
+        var now = Date.now();
+        var armed = armedActions[key];
+        if (armed && now - armed < ARMED_WINDOW_MS) { delete armedActions[key]; return true; }
+        armedActions[key] = now;
+        var seconds = Math.round(ARMED_WINDOW_MS / 1000);
+        setStatus(message + ' — click again within ' + seconds + 's to confirm.', 'live');
+        showToast(message + ' — click again to confirm.', 'live');
+        setTimeout(function () {
+            if (armedActions[key] === now) {
+                delete armedActions[key];
+                setStatus('Confirmation expired — nothing was started.', '');
+            }
+        }, ARMED_WINDOW_MS);
+        return false;
     }
 
     function biblesHtml() {
@@ -333,6 +362,15 @@ var H3StudioTab = (function () {
         var runtime = h3Runner();
         var geometry = runtime && runtime.geometry_constraints || {};
         var resolutions = Array.isArray(geometry.resolutions) ? geometry.resolutions : [];
+        // Geometry is authored per shot. The presets are a convenience fill;
+        // width/height are typed directly and validated against the runtime's
+        // advertised native range, so any resolution in range is renderable.
+        var wStep = Number(geometry.dimension_step) || 32;
+        var wMin = Number(geometry.width_min) || 512, wMax = Number(geometry.width_max) || 1536;
+        var hMin = Number(geometry.height_min) || 480, hMax = Number(geometry.height_max) || 1536;
+        var presetMatch = resolutions.some(function (row) {
+            return Number(row.width) === Number(shot.width) && Number(row.height) === Number(shot.height);
+        });
         var cacheModes = runtime && Array.isArray(runtime.step_cache_modes) ? runtime.step_cache_modes : [];
         var quantModes = runtime && Array.isArray(runtime.quant_modes) ? runtime.quant_modes : [];
         var attentionBackends = h3AttentionBackends();
@@ -351,9 +389,13 @@ var H3StudioTab = (function () {
         return '<label class="h3s-check"><input type="checkbox" data-shot-field="locked"' + checked(lock) + '><span>Lock approved shot. Protect prompt, references, sound, order and takes.</span></label>' +
             '<label class="h3s-field" style="margin-top:10px"><span>Shot name</span><input class="h3s-input" data-shot-field="title" value="' + attr(shot.title) + '"' + disabled(lock) + '></label>' +
             '<div class="h3s-grid-2"><label class="h3s-field"><span>Duration · 5–15s</span><input class="h3s-input" type="number" min="5" max="15" step="0.25" data-shot-field="duration_seconds" value="' + attr(shot.duration_seconds) + '"' + disabled(lock) + '></label>' +
-            '<label class="h3s-field"><span>Resolution</span><select id="h3s-resolution" class="h3s-select"' + disabled(lock) + '>' + resolutions.map(function (row) {
-                return '<option value="' + row.width + 'x' + row.height + '"' + selected(shot.width + 'x' + shot.height, row.width + 'x' + row.height) + '>' + row.label + '</option>';
-            }).join('') + '</select></label></div>' +
+            '<label class="h3s-field"><span>Preset</span><select id="h3s-resolution" class="h3s-select"' + disabled(lock) + '>' +
+                (presetMatch ? '' : '<option value="" selected>Custom \u00b7 ' + shot.width + '\u00d7' + shot.height + '</option>') +
+                resolutions.map(function (row) {
+                    return '<option value="' + row.width + 'x' + row.height + '"' + selected(shot.width + 'x' + shot.height, row.width + 'x' + row.height) + '>' + row.label + '</option>';
+                }).join('') + '</select></label></div>' +
+            '<div class="h3s-grid-2"><label class="h3s-field"><span>Width \u00b7 ' + wMin + '\u2013' + wMax + '</span><input class="h3s-input" type="number" min="' + wMin + '" max="' + wMax + '" step="' + wStep + '" data-shot-field="width" value="' + shot.width + '"' + disabled(lock) + '></label>' +
+            '<label class="h3s-field"><span>Height \u00b7 ' + hMin + '\u2013' + hMax + '</span><input class="h3s-input" type="number" min="' + hMin + '" max="' + hMax + '" step="' + wStep + '" data-shot-field="height" value="' + shot.height + '"' + disabled(lock) + '></label></div>' +
             '<div class="h3s-grid-2"><label class="h3s-field"><span>Steps</span><input class="h3s-input" type="number" min="2" max="50" data-shot-field="steps" value="' + shot.steps + '"' + disabled(lock) + '></label><label class="h3s-field"><span>Seed</span><input class="h3s-input" type="number" min="0" max="4294967295" data-shot-field="seed" value="' + shot.seed + '"' + disabled(lock) + '></label></div>' +
             '<label class="h3s-field"><span>Opening frame</span><div class="h3s-button-row"><input class="h3s-input" data-shot-field="first_frame" value="' + attr(shot.first_frame) + '" placeholder="Server-uploaded path"' + disabled(lock) + '><button class="h3s-btn" data-h3-action="upload-first"' + disabled(lock) + '>Choose</button></div></label>' +
             '<label class="h3s-field"><span>Ending frame</span><div class="h3s-button-row"><input class="h3s-input" data-shot-field="last_frame" value="' + attr(shot.last_frame) + '" placeholder="Server-uploaded path"' + disabled(lock) + '><button class="h3s-btn" data-h3-action="upload-last"' + disabled(lock) + '>Choose</button></div></label>' +
@@ -533,15 +575,23 @@ var H3StudioTab = (function () {
         return '<aside class="h3s-right"><div class="h3s-inspector-tabs">' + tabs.map(function (tab) { return '<button class="h3s-tab ' + (state.inspectorTab === tab[0] ? 'is-active' : '') + '" data-inspector-tab="' + tab[0] + '">' + tab[1] + '</button>'; }).join('') + '</div><div class="h3s-inspector-body">' + body + '</div></aside>';
     }
 
+    // Pixels per second in the continuity strip. Kept modest so a 55 s project
+    // still scans without scrolling far; the real editing timeline is zoomable
+    // and lives in the Video Edit tab.
+    var SPINE_PX_PER_SECOND = 26;
+
     function timelineHtml() {
         var cumulative = 0;
         var rows = [];
         state.project.shots.forEach(function (shot, index) {
             if (index) rows.push('<span class="h3s-spine-join"></span>');
             var start = cumulative; cumulative += Number(shot.duration_seconds || 0);
-            rows.push('<button class="h3s-spine-shot ' + (shot.id === state.selectedShotId ? 'is-active ' : '') + (shot.locked ? 'is-locked' : '') + '" data-select-shot="' + shot.id + '"><div class="h3s-spine-title">' + escapeHtml(shot.title) + '</div><div class="h3s-spine-meta">' + timecode(start) + ' → ' + timecode(cumulative) + '</div><div class="h3s-spine-meta">' + C.detectMode(shot, state.project).toUpperCase() + ' · ' + shot.take_job_ids.length + ' TAKE(S)</div></button>');
+            // Width tracks duration so the strip reads as time: a 15 s shot is
+            // three times the 5 s one. Equal-width cards hid that entirely.
+            var seconds = Number(shot.duration_seconds || 0);
+            rows.push('<button class="h3s-spine-shot ' + (shot.id === state.selectedShotId ? 'is-active ' : '') + (shot.locked ? 'is-locked' : '') + '" data-select-shot="' + shot.id + '" style="flex: 0 0 ' + Math.round(seconds * SPINE_PX_PER_SECOND) + 'px" title="' + attr(shot.title + ' · ' + C.secondsText(seconds) + 's') + '"><div class="h3s-spine-title">' + escapeHtml(shot.title) + '</div><div class="h3s-spine-meta">' + timecode(start) + ' → ' + timecode(cumulative) + '</div><div class="h3s-spine-meta">' + C.detectMode(shot, state.project).toUpperCase() + ' · ' + C.secondsText(seconds) + 's · ' + shot.take_job_ids.length + ' TAKE(S)</div></button>');
         });
-        return '<section class="h3s-timeline"><div class="h3s-timeline-head"><span class="h3s-kicker">Continuity spine</span><span class="h3s-timecode">' + timecode(totalSeconds()) + ' · DELIVERY ' + state.project.delivery_fps + ' FPS</span></div><div class="h3s-spine">' + rows.join('') + '</div></section>';
+        return '<section class="h3s-timeline"><div class="h3s-timeline-head"><span class="h3s-kicker">Continuity spine · widths are duration</span><span class="h3s-timecode">' + timecode(totalSeconds()) + ' · DELIVERY ' + state.project.delivery_fps + ' FPS · edit in the Video Edit tab</span></div><div class="h3s-spine">' + rows.join('') + '</div></section>';
     }
 
     function statusHtml() {
@@ -595,9 +645,11 @@ var H3StudioTab = (function () {
             showToast('The endless base shot is immutable until this run stops or completes.', 'error'); render(); return;
         }
         var value = target.type === 'checkbox' ? target.checked : target.value;
-        if (['duration_seconds', 'steps', 'seed', 'motion_context_frames'].indexOf(field) >= 0) value = Number(value);
+        if (['duration_seconds', 'steps', 'seed', 'motion_context_frames', 'width', 'height'].indexOf(field) >= 0) value = Number(value);
         shot[field] = value;
-        if (field !== 'prompt_override' && field !== 'locked' && ['title', 'seed', 'steps', 'quant', 'attention_backend', 'step_cache', 'motion_context_frames'].indexOf(field) < 0) shot.prompt_override = '';
+        // Geometry, like seed/steps, is a render setting rather than prompt
+        // content: changing it must not discard an authored prompt override.
+        if (field !== 'prompt_override' && field !== 'locked' && ['title', 'seed', 'steps', 'quant', 'attention_backend', 'step_cache', 'motion_context_frames', 'width', 'height'].indexOf(field) < 0) shot.prompt_override = '';
         if (field === 'quant' || field === 'attention_backend')
             shot.attention_backend = resolvedH3Attention(shot);
         saveProject();
@@ -696,7 +748,7 @@ var H3StudioTab = (function () {
         var projectTitle = document.getElementById('h3s-project-title');
         if (projectTitle) projectTitle.addEventListener('input', function () { state.project.title = projectTitle.value; saveProject(); });
         var resolution = document.getElementById('h3s-resolution');
-        if (resolution) resolution.addEventListener('change', function () { if (baseShotMutationBlocked(selectedShot())) { showToast('The endless base dimensions are immutable during the active run.', 'error'); render(); return; } var parts = resolution.value.split('x'); selectedShot().width = Number(parts[0]); selectedShot().height = Number(parts[1]); saveProject(); render(); });
+        if (resolution) resolution.addEventListener('change', function () { if (baseShotMutationBlocked(selectedShot())) { showToast('The endless base dimensions are immutable during the active run.', 'error'); render(); return; } if (!resolution.value) return; var parts = resolution.value.split('x'); selectedShot().width = Number(parts[0]); selectedShot().height = Number(parts[1]); saveProject(); render(); });
         var action = document.getElementById('h3s-director-action');
         if (action) action.addEventListener('change', function () { state.directorAction = action.value; state.requestJson = ''; render(); });
         var panels = document.getElementById('h3s-character-panels');
@@ -786,6 +838,7 @@ var H3StudioTab = (function () {
         else if (action === 'import-project') document.getElementById('h3s-project-import').click();
         else if (action === 'export-project') downloadJson(safeName(state.project.title) + '.serenitymovie.json', state.project);
         else if (action === 'export-edit') downloadJson(safeName(state.project.title) + '.serenityedit.json', C.deliveryManifest(state.project));
+        else if (action === 'open-in-editor') openEditInVideoEditor();
         else if (action === 'add-shot') addShot();
         else if (action === 'add-character') addCharacter();
         else if (action === 'duplicate-shot') duplicateShot();
@@ -815,7 +868,7 @@ var H3StudioTab = (function () {
         if (['submitting', 'running', 'stopping'].indexOf(endlessState().status) >= 0) {
             showToast('Stop the active endless story before replacing this project', 'error'); return;
         }
-        if (!window.confirm('Create a new H3 project? Export the current project first if you need a file copy.')) return;
+        if (!armedConfirm('new-project', 'Create a new H3 project? The current project stays in this library.')) return;
         state.project = C.createProject(); state.selectedShotId = 1; state.requestJson = ''; saveProject('New movie project created'); render();
     }
     function addShot() {
@@ -829,9 +882,82 @@ var H3StudioTab = (function () {
     function deleteShot() {
         if (state.project.shots.length === 1) { setStatus('A project must keep at least one shot', 'error'); return; }
         if (endlessChainShotLocked(selectedShot())) { showToast('An active endless chain shot cannot be deleted.', 'error'); return; }
-        if (!window.confirm('Delete selected shot from this project?')) return;
+        if (!armedConfirm('delete-shot', 'Delete the selected shot from this project?')) return;
         var index = selectedShotIndex(); state.project.shots.splice(index, 1); state.selectedShotId = state.project.shots[Math.min(index, state.project.shots.length - 1)].id; saveProject('Shot deleted'); render();
     }
+    // The bottom strip is a continuity read, not an edit surface. The real
+    // timeline already exists in the Video Edit tab (tracks, ruler, playhead,
+    // zoom, split/razor, trim, snap, undo), so hand the cut to that rather than
+    // grow a second one here. Same import route the H3 ControlNet screen uses:
+    // blob -> /video_edit/projects/<id>/import_clip -> addClipFromExternal.
+    function waitForVideoProject(timeoutMs) {
+        var deadline = Date.now() + timeoutMs;
+        return new Promise(function (resolve, reject) {
+            (function check() {
+                var id = VideoEditTab.getActiveProjectId && VideoEditTab.getActiveProjectId();
+                if (id) return resolve(id);
+                if (Date.now() >= deadline) return reject(new Error('Video Edit project did not become ready'));
+                setTimeout(check, 100);
+            })();
+        });
+    }
+
+    function openEditInVideoEditor() {
+        if (typeof VideoEditTab === 'undefined' || !VideoEditTab.addClipFromExternal) {
+            setStatus('Video Edit is unavailable.', 'error'); showToast('Video Edit is unavailable.', 'error'); return;
+        }
+        var cut = state.project.shots.map(function (shot, index) {
+            var take = shot.selected_take >= 0 ? shot.take_output_paths[shot.selected_take] : '';
+            var state_ = shot.selected_take >= 0 ? shot.take_states[shot.selected_take] : '';
+            return { shot: shot, index: index, url: take || shot.output_path || '', done: state_ === 'done' || !!(take || shot.output_path) };
+        }).filter(function (row) { return row.url && row.done; });
+        if (!cut.length) {
+            setStatus('No rendered takes to send. Queue a take first.', 'error');
+            showToast('No rendered takes to send. Queue a take first.', 'error');
+            return;
+        }
+        var skipped = state.project.shots.length - cut.length;
+        if (typeof switchTab === 'function') switchTab('video-edit');
+        if (!VideoEditTab._initialized) VideoEditTab.init();
+        requestAnimationFrame(function () { if (VideoEditTab.resize) VideoEditTab.resize(); });
+
+        waitForVideoProject(5000).then(function (projectId) {
+            // Sequential on purpose: addClipFromExternal appends at the end of
+            // the track, so concurrency would scramble the shot order.
+            return cut.reduce(function (chain, row) {
+                return chain.then(function () {
+                    setStatus('Sending shot ' + (row.index + 1) + ' of ' + state.project.shots.length + ' to Video Edit…', 'live');
+                    return fetch(row.url, { cache: 'no-store' }).then(function (response) {
+                        if (!response.ok) throw new Error(row.shot.title + ': HTTP ' + response.status);
+                        return response.blob();
+                    }).then(function (blob) {
+                        var form = new FormData();
+                        form.append('file', blob, safeName(row.shot.title || ('shot-' + (row.index + 1))) + '.mp4');
+                        return fetch('/video_edit/projects/' + encodeURIComponent(projectId) + '/import_clip', { method: 'POST', body: form });
+                    }).then(function (response) {
+                        return response.json().then(function (data) {
+                            if (!response.ok || data.error) throw new Error(data.error || ('HTTP ' + response.status));
+                            return data;
+                        });
+                    }).then(function (data) {
+                        var importedSeconds = Number(data.duration_frames || 0) / Math.max(1, Number(data.fps || C.NATIVE_FPS));
+                        var seconds = Number(row.shot.duration_seconds) || importedSeconds || 5;
+                        VideoEditTab.addClipFromExternal(data.source_path, row.shot.title || ('Shot ' + (row.index + 1)),
+                            Math.max(1, Math.round(seconds * C.NATIVE_FPS)), C.NATIVE_FPS);
+                    });
+                });
+            }, Promise.resolve());
+        }).then(function () {
+            if (VideoEditTab.resize) VideoEditTab.resize();
+            var message = cut.length + ' shot(s) placed on the Video Edit timeline' +
+                (skipped ? ' — ' + skipped + ' shot(s) skipped with no rendered take' : '') + '.';
+            setStatus(message, 'live'); showToast(message, 'live');
+        }).catch(function (error) {
+            setStatus('Video Edit import failed: ' + error.message, 'error');
+            showToast('Video Edit import failed: ' + error.message, 'error');
+        });
+    }
+
     function moveShot(delta) {
         if (endlessChainShotLocked(selectedShot())) { showToast('An active endless chain shot cannot be reordered.', 'error'); return; }
         var index = selectedShotIndex(), target = index + delta; if (target < 0 || target >= state.project.shots.length) return;
@@ -985,7 +1111,7 @@ var H3StudioTab = (function () {
             var resolvedAttention = resolvedH3Attention(base);
             if (base.attention_backend !== resolvedAttention) base.attention_backend = resolvedAttention;
             var run = C.createEndlessRun(base, draft.target_seconds, draft.segment_seconds, draft.continuation_direction);
-            if (!window.confirm('Queue ' + run.segment_durations.length + ' serial H3 render(s) for ' + C.secondsText(run.target_seconds) + ' seconds total? Each completed segment automatically starts the next GPU job.')) return;
+            if (!armedConfirm('queue-endless', 'Queue ' + run.segment_durations.length + ' serial H3 render(s) for ' + C.secondsText(run.target_seconds) + ' seconds total? This starts GPU work.')) return;
             state.project.endless = run;
             state.stageTab = 'endless';
             saveProject(); render();
@@ -1232,13 +1358,26 @@ var H3StudioTab = (function () {
                     throw new Error('H3 currently requires ' + constraints.width_min + '×' + constraints.height_min + ', ' +
                         constraints.frames + ' frames at ' + constraints.fps_min + ' FPS, ' + constraints.steps + ' steps.');
                 }
+            } else if (constraints.shape_policy === 'native_range') {
+                // Any geometry inside the runtime's native range renders. Check it
+                // here only so an out-of-range shot says why instead of coming back
+                // as a bare server rejection.
+                var step = Number(constraints.dimension_step) || 32;
+                var bad = null;
+                if (request.width < constraints.width_min || request.width > constraints.width_max)
+                    bad = 'width ' + request.width + ' is outside the native range ' + constraints.width_min + '–' + constraints.width_max;
+                else if (request.height < constraints.height_min || request.height > constraints.height_max)
+                    bad = 'height ' + request.height + ' is outside the native range ' + constraints.height_min + '–' + constraints.height_max;
+                else if (request.width % step || request.height % step)
+                    bad = request.width + '×' + request.height + ' must be a multiple of ' + step;
+                if (bad) throw new Error('H3 ' + bad + '.');
             }
             if (request.task !== 't2va' && !(runner.conditioned_modes || []).some(function (mode) {
                 return mode.id === request.task && mode.available_modes && mode.available_modes[request.quant];
             })) throw new Error('H3 task ' + request.task + ' is not available in the native compiler yet.');
             if (!(runner.step_cache_modes || []).some(function (mode) { return mode.id === request.step_cache && mode.available; }))
                 throw new Error('The selected H3 denoise cache is not implemented by this runner.');
-            if (!window.confirm('Queue one ' + C.secondsText(shot.duration_seconds) + '-second H3 take at ' + shot.width + '×' + shot.height + '? This starts GPU work.')) return;
+            if (!armedConfirm('queue-take', 'Queue one ' + C.secondsText(shot.duration_seconds) + '-second H3 take at ' + shot.width + '×' + shot.height + '? This starts GPU work.')) return;
             setStatus('Submitting H3 take…', 'live');
             SerenityAPI.postVideo(request).then(function (job) {
                 if (!job || !(job.video_id || job.prompt_id)) throw new Error('server did not return a video job id');

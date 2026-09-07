@@ -1094,15 +1094,32 @@ pub(super) fn minimax_h3_profile_document(profile: &MiniMaxH3RequestProfile) -> 
 pub(super) fn compiler_h3_geometry_document() -> Value {
     let doc = difc_config::current().expect("deployment config");
     let p = &doc["minimax_h3"]["profile"];
-    let seconds = p["frames"].as_f64().unwrap() / p["fps"].as_f64().unwrap();
+    // Geometry is NOT sealed to the fixture profile. The denoiser program and its
+    // bundle are rebuilt per request from the actual row counts, the video VAE
+    // decodes through the tiled program, and audio is geometry-independent.
+    // ControlNet was already exempt from the old runner gate and has been
+    // rendering off profile: video-0044 and video-0051 both decoded 1344x768x120
+    // through this same chain. Advertising a sealed single shape made H3 Studio
+    // refuse every take that was not exactly the fixture geometry.
+    //
+    // FPS stays pinned: output framing and the 17-frame internal alignment are
+    // derived from it. Duration keeps the product's 5-15s window.
     json!({
-        "shape_policy":"sealed_native_profile",
-        "width_min":p["width"], "width_max":p["width"],
-        "height_min":p["height"], "height_max":p["height"],
+        "shape_policy":"native_range",
+        "width_min":512, "width_max":1536,
+        "height_min":480, "height_max":1536,
         "dimension_step":32,
-        "resolutions":[{"width":p["width"], "height":p["height"], "label":p["id"]}],
-        "resolution_role":"sealed_allowlist",
-        "seconds_min":seconds, "seconds_max":seconds,
+        "resolutions":[
+            {"width":p["width"], "height":p["height"], "label":p["id"]},
+            {"width":1536, "height":672, "label":"21:9 · 1536×672"},
+            {"width":1344, "height":768, "label":"16:9 · 1344×768"},
+            {"width":1024, "height":768, "label":"4:3 · 1024×768"},
+            {"width":768,  "height":768, "label":"1:1 · 768×768"},
+            {"width":768,  "height":1024, "label":"3:4 · 768×1024"},
+            {"width":768,  "height":1344, "label":"9:16 · 768×1344"}
+        ],
+        "resolution_role":"suggested_presets",
+        "seconds_min":5.0, "seconds_max":15.0,
         "fps_min":p["fps"], "fps_max":p["fps"],
         "frames":p["frames"], "steps":p["steps"],
         "long_context_policy":"not_implemented"
@@ -1375,7 +1392,17 @@ pub(super) fn minimax_h3_progress_from_log(
     requested_steps: i64,
 ) -> Option<(String, i64, i64, String)> {
     let mut progress = None;
+    // Both the control-media encode and the Ref2VA reference encode emit
+    // H3_ENCODE_CLIP. The runner names which one it is on the preceding
+    // `phase=` line, so track that rather than labelling every clip encode
+    // as control media.
+    let mut encoding_references = false;
     for line in log.lines() {
+        if line.contains("phase=reference-encode") || line.contains("phase=reference-prepare") {
+            encoding_references = true;
+        } else if line.contains("phase=control-encode") || line.contains("phase=control-media") {
+            encoding_references = false;
+        }
         if line.contains("conditioning cache: HIT") {
             progress = Some((
                 "conditioning_cache".to_string(),
@@ -1421,12 +1448,21 @@ pub(super) fn minimax_h3_progress_from_log(
                     Some((done.trim().parse::<i64>().ok()?, total.trim().parse::<i64>().ok()?))
                 })
             {
-                progress = Some((
-                    "control_encode".to_string(),
-                    done,
-                    total,
-                    format!("Encoding control video: clip {done} of {total}"),
-                ));
+                progress = Some(if encoding_references {
+                    (
+                        "reference_encode".to_string(),
+                        done,
+                        total,
+                        format!("Encoding reference media: clip {done} of {total}"),
+                    )
+                } else {
+                    (
+                        "control_encode".to_string(),
+                        done,
+                        total,
+                        format!("Encoding control video: clip {done} of {total}"),
+                    )
+                });
             }
         } else if line.contains("resident cache: loaded block") {
             // Streamed INT8 tails may visit cache blocks between completed
@@ -1645,9 +1681,20 @@ pub(super) fn validate_compiler_h3_request_in(body: &Value, doc: &Value) -> Resu
     if body.get("seed").is_some_and(|v| !v.as_u64().is_some_and(|seed| seed <= u32::MAX as u64)) {
         return Err("H3 seed must be an integer from 0 through 4294967295".into());
     }
-    if minimax_h3_task(body) != "controlnet"
-        && geometry.output_frames != doc["minimax_h3"]["profile"]["frames"].as_i64().unwrap() {
-        return Err("H3 output duration must match the configured frame count; trimming/resampling is not implemented by this runner yet".into());
+    // Duration is authored per shot, not pinned to the fixture profile. What
+    // actually has to hold is that the delivered frames exist in what the runner
+    // produced: the runner is driven with --output-frames=model_output_frames and
+    // the encoder with --output-frames/--trim-start-frames, so the head trim and
+    // the tail cut are already plumbed. Resampling is still not implemented, so
+    // delivery fps must equal the model rate (h3_contract keeps fps sealed).
+    if geometry.model_output_frames + geometry.trim_start_frames > geometry.internal_frames {
+        return Err(format!(
+            "H3 delivery of {} frames plus a {}-frame motion seam exceeds the {} frames this pass generates",
+            geometry.model_output_frames, geometry.trim_start_frames, geometry.internal_frames,
+        ));
+    }
+    if geometry.fps != MINIMAX_H3_FPS && geometry.output_frames != geometry.model_output_frames {
+        return Err("H3 delivery frame rate must match the model rate; resampling is not implemented by this runner yet".into());
     }
     let lora_args = compiler_h3_lora_args(body, doc)?;
     let selected = difc_config::h3_task_document(doc, minimax_h3_task(body))?;
