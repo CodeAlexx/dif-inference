@@ -135,3 +135,53 @@ reserve intact. The dynamic admission gates still refuse against live
   `minimax_h3_compiler_references_preserve_audio_order_roles_and_staging`,
   `readiness_shape`). They predate this work and reproduce with these changes
   stashed.
+
+## 5. The modulation cache was discarded for the wrong reason
+
+After the gates were lifted, an authored resolution still ran ~4x slower than
+the fixture shape. The runner dropped the sealed AdaLN modulation cache whenever
+width, height or frame count departed from the profile, and compact AdaLN plus
+CUTLASS scaled-all depend on that cache, so every off-profile render also lost
+the INT8 fast path.
+
+The cache carries its own description:
+
+    __meta__.kind             = adaln-modulation
+    __meta__.row_layout       = per-evaluation-sorted-unique-padded-v1
+    __meta__.steps            = 20
+    __meta__.distinct_timesteps = 38
+    __meta__.nblocks          = 50
+
+and holds 50 tensors of shape (114, 32256), one per block, where 114 = 3 x 38
+distinct timesteps. Nothing in it is sized by width, height or frames.
+
+The remaining question was whether the timestep schedule itself moves with
+resolution -- if it did, the cached rows would be keyed to the wrong timesteps.
+It does not. Comparing the per-evaluation `video_t` values logged by the same
+shot rendered at 768x768 with the cache discarded (video-0067) and retained
+(video-0068), all 19 evaluations agree exactly:
+
+    diff <(grep -o 'video_t=[0-9.e-]*' video-0067/runner.log) \
+         <(grep -o 'video_t=[0-9.e-]*' video-0068/runner.log)   ->  0 differing lines
+
+So the cache is valid at any geometry, and only a different schedule or block
+count invalidates it. The clearing condition is now `STEPS` and `BLOCKS` only.
+
+### Measured
+
+Same shot, same seed 1000, same convrot-int8 route, same 768x768:
+
+| run | modulation cache | mean denoiser |
+|---|---|---|
+| video-0067 | discarded | 47,121 ms/step |
+| video-0068 | HIT | 10,936 ms/step |
+
+4.31x. Both completed with `guard_rc=0 child_rc=0`.
+
+This is **not** bit-parity and should not be described as such: PSNR between the
+two is 24.67 dB average / 22.97 dB luma. The frames are the same scene, subject,
+pose, framing and lighting -- the divergence is the INT8 compact-AdaLN/CUTLASS
+route versus online modulation, and H3's sample is known to be chaotic to small
+perturbations in the early evaluations. The cached route is the one the sealed
+profile has always used; the slow online path was what off-profile geometry had
+been forced onto.

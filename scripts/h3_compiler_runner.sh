@@ -287,12 +287,16 @@ fi
 jq -e --arg quant "$QUANT" '.minimax_h3.profile.quant_modes | index($quant) != null' <<<"$DIFC_DOCUMENT" >/dev/null || { echo "FATAL unsupported quant=$QUANT" >&2; exit 65; }
 "$DIFC_CONFIG_TOOL" check-h3 "$QUANT" --task "$TASK" || exit 66
 MODCACHE="$(jq_get minimax_h3.modulation_cache)"
-# The sealed modulation cache is shaped by the profile's schedule AND geometry.
-# Any request that departs from either computes modulation online instead.
+# The cache is an AdaLN modulation table indexed by evaluation timestep and
+# block, not by geometry. Its own metadata reads kind=adaln-modulation,
+# steps=20, distinct_timesteps=38, nblocks=50, and it holds 50 tensors of shape
+# (114, 32256) = 3 x 38 timesteps, one per block; nothing in it is sized by
+# width, height or frame count. Discarding it for an authored resolution was
+# therefore throwing away a table that was still valid, and with it the
+# compact-AdaLN/CUTLASS INT8 path. Only a different schedule or block count
+# actually invalidates it.
 if [[ "$STEPS" != "$(jq_get minimax_h3.profile.steps)" \
-   || "$W" != "$(jq_get minimax_h3.profile.width)" \
-   || "$H" != "$(jq_get minimax_h3.profile.height)" \
-   || "$FRAMES" != "$EXPECTED_FRAMES" ]]; then
+   || "$BLOCKS" != "$(jq_get minimax_h3.profile.blocks)" ]]; then
   MODCACHE="" # Existing native online modulation uses the requested schedule.
 fi
 TIMESTEP_TABLES="$(jq_get minimax_h3.profile.timestep_tables)"
