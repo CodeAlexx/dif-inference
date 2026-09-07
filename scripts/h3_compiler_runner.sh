@@ -59,6 +59,10 @@ release_streamed_pages() {
     | while IFS= read -r line; do echo "[difc-h3] ${line#\[page-cache\] }"; done || true
 }
 trap release_streamed_pages EXIT
+# Release once up front as well. The EXIT trap only helps the NEXT job, and the
+# guard samples pressure while THIS one runs: a cancel was still reproduced with
+# 22 GB free and a 1.76 GB child because the cache was refilled between runs.
+release_streamed_pages
 
 
 # Preparation is explicit and uses native compiler tools. Never claim an old
