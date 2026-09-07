@@ -10,6 +10,7 @@ var H3StudioTab = (function () {
     var STORAGE_KEY = 'serenity-h3-current-project-v1';
     var state = {
         initialized: false,
+        renderAll: null,
         project: null,
         selectedShotId: 1,
         stageTab: 'director',
@@ -351,7 +352,7 @@ var H3StudioTab = (function () {
         return '<div class="h3s-stage"><div class="h3s-stage-tabs">' + tabs.map(function (tab) {
             return '<button class="h3s-tab ' + (state.stageTab === tab[0] ? 'is-active' : '') + '" data-stage-tab="' + tab[0] + '">' + tab[1] + '</button>';
         }).join('') + '</div><div class="h3s-stage-body">' + body + '</div>' +
-            '<div class="h3s-button-row" style="margin-top:9px"><button class="h3s-btn is-primary" data-h3-action="render-shot">Queue H3 take</button><button class="h3s-btn" data-h3-action="continue-take"' + disabled(!selectedTakeDone()) + '>Continue selected take</button></div></div>';
+            '<div class="h3s-button-row" style="margin-top:9px"><button class="h3s-btn is-primary" data-h3-action="render-shot">Queue H3 take</button><button class="h3s-btn" data-h3-action="render-all">' + (state.renderAll ? 'Stop render all (' + state.renderAll.done + '/' + state.renderAll.total + ')' : 'Render all shots') + '</button><button class="h3s-btn" data-h3-action="continue-take"' + disabled(!selectedTakeDone()) + '>Continue selected take</button></div></div>';
     }
 
     function centerHtml() { return '<main class="h3s-center">' + monitorHtml() + stageHtml() + '</main>'; }
@@ -857,6 +858,7 @@ var H3StudioTab = (function () {
         else if (action === 'upload-asset') document.getElementById('h3s-asset-file').click();
         else if (action === 'add-lora') addFeature('lora');
         else if (action === 'render-shot') renderShot();
+        else if (action === 'render-all') renderAllShots();
         else if (action === 'continue-take') continueTake();
         else if (action === 'start-endless') startEndless();
         else if (action === 'resume-endless') resumeFailedEndless();
@@ -1341,9 +1343,9 @@ var H3StudioTab = (function () {
         }
     }
 
-    function renderShot() {
+    function renderShot(targetShot) {
         if (state.controlsUploading) { showToast('Wait for control media uploads to finish.', 'error'); return; }
-        var shot = selectedShot();
+        var shot = targetShot || selectedShot();
         if (endlessChainShotLocked(shot)) {
             showToast('The active endless chain owns this shot. Select another shot to queue an independent manual render.', 'error'); return;
         }
@@ -1399,6 +1401,68 @@ var H3StudioTab = (function () {
                 setStatus('Queued ' + id + ' · waiting for H3 runtime', 'live'); render(); pollVideo(job, shot.id);
             }).catch(function (error) { setStatus('H3 submission failed: ' + error.message, 'error'); showToast('H3 submission failed: ' + error.message, 'error'); });
         } catch (error) { setStatus(error.message, 'error'); showToast(error.message, 'error'); }
+    }
+
+    // Render the whole deck. A multi-shot movie that can only render one shot at
+    // a time, by hand, is not a moviemaker. The GPU is single-tenant (the server
+    // refuses a second job with "gpu busy"), so this is strictly serial: queue a
+    // shot, wait for it to reach a finished take or fail, then take the next one
+    // that still has none. A failure is recorded and the run continues.
+    function shotHasFinishedTake(shot) {
+        if (!shot || !shot.take_states) return false;
+        for (var i = 0; i < shot.take_states.length; i++) {
+            if (shot.take_states[i] === 'done' && shot.take_output_paths[i]) return true;
+        }
+        return false;
+    }
+
+    function stopRenderAll(message) {
+        state.renderAll = null;
+        if (message) { setStatus(message, ''); showToast(message, ''); }
+        render();
+    }
+
+    function renderAllShots() {
+        if (state.renderAll) { stopRenderAll('Render all stopped \u2014 the shot in flight finishes on its own.'); return; }
+        var pending = state.project.shots.filter(function (shot) { return !shotHasFinishedTake(shot); });
+        if (!pending.length) { setStatus('Every shot already has a finished take.', ''); showToast('Every shot already has a finished take.', ''); return; }
+        state.renderAll = { total: pending.length, done: 0, failed: [] };
+        render();
+        step();
+
+        function step() {
+            if (!state.renderAll) return;
+            var next = state.project.shots.find(function (shot) {
+                return !shotHasFinishedTake(shot) && state.renderAll.failed.indexOf(shot.id) < 0;
+            });
+            if (!next) {
+                var failed = state.renderAll.failed.length;
+                stopRenderAll(failed
+                    ? state.renderAll.done + ' shot(s) rendered, ' + failed + ' failed.'
+                    : 'All ' + state.renderAll.done + ' shot(s) rendered.');
+                return;
+            }
+            state.selectedShotId = next.id;
+            setStatus('Render all \u00b7 shot ' + (state.project.shots.indexOf(next) + 1) + ' of ' +
+                      state.project.shots.length + ' \u00b7 ' + next.title, 'live');
+            render();
+            renderShot(next);
+            waitFor(next.id);
+        }
+
+        function waitFor(shotId) {
+            if (!state.renderAll) return;
+            var shot = state.project.shots.find(function (s) { return s.id === shotId; });
+            if (!shot) { setTimeout(step, 500); return; }
+            if (shotHasFinishedTake(shot)) { state.renderAll.done += 1; setTimeout(step, 800); return; }
+            if (shot.status === 'Failed') {
+                state.renderAll.failed.push(shotId);
+                showToast('Shot "' + shot.title + '" failed \u2014 continuing with the rest.', 'error');
+                setTimeout(step, 800);
+                return;
+            }
+            setTimeout(function () { waitFor(shotId); }, 1000);
+        }
     }
 
     function pollVideo(job, shotId) {

@@ -2205,8 +2205,12 @@ pub(super) fn start_minimax_h3_request(
             // Decode-side failures leave a complete denoise behind; keep the
             // latents so the decode can be retried instead of losing the
             // render (see cleanup_minimax_h3_intermediates).
-            let keep_latents = phase == "decode" || phase == "decode_start" || phase == "result";
-            cleanup_minimax_h3_intermediates(&thread_out_dir, keep_latents);
+            // A failed job deletes NOTHING; intermediates are cleaned on the
+            // success path only. Keying this on which phase reported the failure
+            // threw away finished work: a wrapper can report a failure at phase
+            // "denoise" after the denoise has already written latents, and those
+            // latents were then deleted, losing the entire GPU cost of the job.
+            // Whatever is on disk when a job fails is what makes it recoverable.
             let _ = write_minimax_h3_job_status(&thread_out_dir, "failed", phase, 0, steps, &error);
             publish(WorkerEvent::Failed { error });
         };
@@ -2938,8 +2942,12 @@ pub(super) fn start_minimax_h3_conditioned_request(
             // Decode-side failures leave a complete denoise behind; keep the
             // latents so the decode can be retried instead of losing the
             // render (see cleanup_minimax_h3_intermediates).
-            let keep_latents = phase == "decode" || phase == "decode_start" || phase == "result";
-            cleanup_minimax_h3_intermediates(&thread_out_dir, keep_latents);
+            // A failed job deletes NOTHING; intermediates are cleaned on the
+            // success path only. Keying this on which phase reported the failure
+            // threw away finished work: a wrapper can report a failure at phase
+            // "denoise" after the denoise has already written latents, and those
+            // latents were then deleted, losing the entire GPU cost of the job.
+            // Whatever is on disk when a job fails is what makes it recoverable.
             let _ = write_minimax_h3_job_status(&thread_out_dir, "failed", phase, 0, steps, &error);
             publish(WorkerEvent::Failed { error });
         };
