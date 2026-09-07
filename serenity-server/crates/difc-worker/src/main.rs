@@ -36,10 +36,10 @@ struct Config {
     /// Directory holding the compiler executables (dif*). Used as-is; never rebuilt here.
     compiler_build: String,
     /// flock file serializing GPU work with everything else on the box.
-    #[serde(default = "default_gpu_lock")]
+    #[serde(default)]
     gpu_lock: String,
     /// Seconds to wait for the GPU lock before failing the job.
-    #[serde(default = "default_lock_wait")]
+    #[serde(default)]
     gpu_lock_wait_seconds: u64,
     /// Host-memory cap for each compiler stage, applied with a systemd user
     /// scope (stays inside the worker's process group so cancel reaches it).
@@ -56,6 +56,10 @@ struct Config {
     stage_env: BTreeMap<String, String>,
     #[serde(default)]
     flux2_klein_base_9b: Option<Flux2Config>,
+    #[serde(default)]
+    flux2_klein_base_4b: Option<Flux2Config>,
+    #[serde(default)]
+    sdxl: Option<SdxlConfig>,
     /// Krea 2 chain settings are read by scripts/krea2_chain.sh; the worker only
     /// checks the section exists and that the checkpoints are on disk.
     #[serde(default)]
@@ -64,26 +68,33 @@ struct Config {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Krea2Config {
+    runner: String,
     turbo_checkpoint: String,
     raw_checkpoint: String,
     conditioner_bundle: String,
     vae_checkpoint: String,
 }
 
-fn default_gpu_lock() -> String {
-    "/tmp/dc-gpu.lock".to_string()
-}
-fn default_lock_wait() -> u64 {
-    3600
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct Flux2Config {
     model_dir: String,
+    #[serde(default)]
+    text_encoder_dir: Option<String>,
+    #[serde(default)]
+    tokenizer_dir: Option<String>,
     transformer_checkpoint: String,
     vae_checkpoint: String,
     cache_dir: String,
     /// Accepted execution-policy flags (precision route, residency, staging).
+    #[serde(default)]
+    extra_args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SdxlConfig {
+    checkpoint: String,
+    tokenizer_dir: String,
+    cache_dir: String,
     #[serde(default)]
     extra_args: Vec<String>,
 }
@@ -102,12 +113,9 @@ fn repository_root() -> PathBuf {
 }
 
 fn load_config() -> Result<Config, String> {
-    let path = std::env::var_os("DIFC_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository_root().join("config/difc.json"));
-    let text = fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read worker config {}: {e}", path.display()))?;
-    let cfg: Config = serde_json::from_str(&text)
+    let path = difc_config::config_path();
+    let doc = difc_config::load(&path, &repository_root())?;
+    let cfg: Config = serde_json::from_value(doc)
         .map_err(|e| format!("invalid worker config {}: {e}", path.display()))?;
     if !Path::new(&cfg.compiler_build).is_dir() {
         return Err(format!(
@@ -299,6 +307,8 @@ mod png {
 enum Family {
     Stub,
     Flux2KleinBase9b,
+    Flux2KleinBase4b,
+    SdxlBase,
     Krea2Turbo,
     Krea2Raw,
 }
@@ -308,6 +318,8 @@ impl Family {
         match self {
             Family::Stub => "stub",
             Family::Flux2KleinBase9b => "flux2_klein_base_9b",
+            Family::Flux2KleinBase4b => "flux2_klein_base_4b",
+            Family::SdxlBase => "sdxl",
             Family::Krea2Turbo => "krea2_turbo",
             Family::Krea2Raw => "krea2_raw",
         }
@@ -320,16 +332,29 @@ fn resolve_family(model: &str, checkpoint_path: &str) -> Result<Family, String> 
     if m == "stub" {
         return Ok(Family::Stub);
     }
-    let klein9b = |s: &str| s.contains("klein") && s.contains("base") && s.contains("9b");
-    if klein9b(&m) || klein9b(&c) {
-        return Ok(Family::Flux2KleinBase9b);
+    let klein = |s: &str| {
+        // JSON owns names/checkpoints; these keys select implemented algorithms.
+        match difc_config::image_profile(s).map(|(key, _)| key) {
+            Some("flux2_klein_base_9b") => Some(Family::Flux2KleinBase9b),
+            Some("flux2_klein_base_4b") => Some(Family::Flux2KleinBase4b),
+            Some("sdxl") => Some(Family::SdxlBase),
+            _ => None,
+        }
+    };
+    let from_model = klein(&m);
+    let from_checkpoint = klein(&c);
+    if let (Some(a), Some(b)) = (from_model, from_checkpoint) {
+        if a != b { return Err("selected model and checkpoint identify different compiler profiles".into()); }
+    }
+    if let Some(family) = from_model.or(from_checkpoint) {
+        return Ok(family);
     }
     if m.contains("krea") || c.contains("krea") {
         return Ok(if m.contains("raw") || c.contains("raw") { Family::Krea2Raw } else { Family::Krea2Turbo });
     }
     Err(format!(
         "model '{model}' (checkpoint '{checkpoint_path}') is not a family the Diffusion Compiler serves here; \
-         admitted: FLUX.2 [klein] Base 9B, Krea 2 Turbo / Raw, stub"
+         admitted: FLUX.2 [klein] Base 9B / Base 4B, SDXL Base 1.0, Krea 2 Turbo / Raw, stub"
     ))
 }
 
@@ -391,10 +416,13 @@ struct Chain {
     report: PathBuf,
 }
 
-fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, String> {
-    let f = cfg.flux2_klein_base_9b.as_ref().ok_or(
-        "worker config has no flux2_klein_base_9b section (model dir, VAE, cache, accepted flags)",
-    )?;
+fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path, family: Family) -> Result<Chain, String> {
+    let (settings, variant) = match family {
+        Family::Flux2KleinBase9b => (&cfg.flux2_klein_base_9b, "klein9b"),
+        Family::Flux2KleinBase4b => (&cfg.flux2_klein_base_4b, "klein4b"),
+        _ => return Err("not a Klein compiler profile".into()),
+    };
+    let f = settings.as_ref().ok_or_else(|| format!("worker config has no {} section", family.key()))?;
     for (what, path) in [
         ("model_dir", &f.model_dir),
         ("transformer_checkpoint", &f.transformer_checkpoint),
@@ -402,6 +430,23 @@ fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, 
     ] {
         if !Path::new(path).exists() {
             return Err(format!("flux2 {what} missing on disk: {path}"));
+        }
+    }
+    if !p.checkpoint_path.is_empty() {
+        let selected = fs::canonicalize(&p.checkpoint_path)
+            .map_err(|e| format!("cannot resolve selected checkpoint: {e}"))?;
+        let configured = fs::canonicalize(&f.transformer_checkpoint)
+            .map_err(|e| format!("cannot resolve configured checkpoint: {e}"))?;
+        if selected != configured {
+            return Err("selected checkpoint is not the configured Klein profile; refusing to substitute weights".into());
+        }
+    }
+    for (what, path) in [
+        ("text encoder", f.text_encoder_dir.as_ref()),
+        ("tokenizer", f.tokenizer_dir.as_ref()),
+    ] {
+        if let Some(path) = path {
+            if !Path::new(path).is_dir() { return Err(format!("flux2 {what} directory missing: {path}")); }
         }
     }
     let sampler = p.sampler.to_ascii_lowercase();
@@ -431,6 +476,9 @@ fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, 
             p.width, p.height
         ));
     }
+    if !p.cfg.is_finite() || p.cfg < 0.0 {
+        return Err("CFG must be finite and nonnegative".into());
+    }
     if p.steps < 1 {
         return Err(format!("steps={} must be >= 1", p.steps));
     }
@@ -442,6 +490,8 @@ fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, 
     let report = work.join("report.json");
     let mut argv = vec![
         format!("{}/difflux2sample", cfg.compiler_build),
+        "--flux2-model".into(),
+        variant.into(),
         "--model-dir".into(),
         f.model_dir.clone(),
         "--transformer-checkpoint".into(),
@@ -467,15 +517,81 @@ fn build_flux2_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, 
         "--report".into(),
         report.to_string_lossy().into_owned(),
     ];
+    if let Some(path) = &f.text_encoder_dir {
+        argv.extend(["--text-encoder-dir".into(), path.clone()]);
+    }
+    if let Some(path) = &f.tokenizer_dir {
+        argv.extend(["--tokenizer-dir".into(), path.clone()]);
+    }
+    // Execution policy must not replace semantic request/model arguments.
+    for arg in &f.extra_args {
+        if ["--flux2-model", "--model-dir", "--transformer-checkpoint", "--vae-checkpoint",
+            "--text-encoder-dir", "--tokenizer-dir", "--prompt", "--seed", "--steps", "--width",
+            "--height", "--guidance", "--output", "--report", "--cache-dir"]
+            .contains(&arg.as_str()) {
+            return Err(format!("{} extra_args may not override {arg}", family.key()));
+        }
+    }
     argv.extend(f.extra_args.iter().cloned());
     Ok(Chain {
-        family: Family::Flux2KleinBase9b,
+        family,
         argv,
         step_prefix: "FLUX2_NATIVE_STEP",
         total_steps: p.steps,
         image,
         report,
     })
+}
+
+fn build_sdxl_chain(cfg: &Config, p: &JobParams, work: &Path) -> Result<Chain, String> {
+    let f = cfg.sdxl.as_ref().ok_or("worker config has no sdxl section")?;
+    for path in [PathBuf::from(&f.checkpoint), Path::new(&f.tokenizer_dir).join("vocab.json"),
+                 Path::new(&f.tokenizer_dir).join("merges.txt")] {
+        if !path.is_file() { return Err(format!("SDXL artifact missing: {}", path.display())); }
+    }
+    if !p.checkpoint_path.is_empty() &&
+        fs::canonicalize(&p.checkpoint_path).map_err(|e| format!("selected checkpoint: {e}"))? !=
+        fs::canonicalize(&f.checkpoint).map_err(|e| format!("configured checkpoint: {e}"))? {
+        return Err("selected checkpoint is not the configured SDXL profile; refusing to substitute weights".into());
+    }
+    if !matches!(p.sampler.to_ascii_lowercase().as_str(), "" | "euler") ||
+        !matches!(p.scheduler.to_ascii_lowercase().as_str(), "" | "normal") {
+        return Err("SDXL compiler chain supports Euler with the normal discrete DDPM schedule only".into());
+    }
+    let unsupported = unsupported_knobs(p, true);
+    if !unsupported.is_empty() {
+        return Err(format!("SDXL compiler chain cannot honor: {}", unsupported.join("; ")));
+    }
+    if p.width <= 0 || p.height <= 0 || p.width % 8 != 0 || p.height % 8 != 0 {
+        return Err("SDXL width and height must be positive multiples of eight".into());
+    }
+    if p.steps < 1 || p.steps > i64::from(u32::MAX) || !p.cfg.is_finite() || p.cfg < 0.0 {
+        return Err("SDXL requires positive uint32 steps and finite nonnegative CFG".into());
+    }
+    if p.prompt.trim().is_empty() { return Err("empty prompt".into()); }
+    // Dtype is an execution policy. No extra flag may replace user semantics,
+    // change the output path, or quietly produce a different number of images.
+    if f.extra_args.len() % 2 != 0 { return Err("sdxl extra_args must be dtype flag/value pairs".into()); }
+    for pair in f.extra_args.chunks_exact(2) {
+        let accepted = match pair[0].as_str() {
+            "--unet-dtype" | "--clip-dtype" => matches!(pair[1].as_str(), "f16" | "bf16" | "f32"),
+            "--vae-dtype" => matches!(pair[1].as_str(), "bf16" | "f32"),
+            _ => false,
+        };
+        if !accepted { return Err(format!("sdxl extra_args refuses {} {}", pair[0], pair[1])); }
+    }
+    let image = work.join("image.png");
+    let report = work.join("report.json");
+    let mut argv = vec![format!("{}/difsdxlsample", cfg.compiler_build),
+        "--checkpoint".into(), f.checkpoint.clone(), "--tokenizer-dir".into(), f.tokenizer_dir.clone(),
+        "--prompt".into(), p.prompt.clone(), "--negative".into(), p.negative.clone(),
+        "--seed".into(), p.seed.unsigned_abs().to_string(), "--steps".into(), p.steps.to_string(),
+        "--cfg".into(), p.cfg.to_string(), "--width".into(), p.width.to_string(),
+        "--height".into(), p.height.to_string(), "--cache-dir".into(), f.cache_dir.clone(),
+        "--output".into(), image.to_string_lossy().into_owned(),
+        "--report".into(), report.to_string_lossy().into_owned(), "--report-steps".into()];
+    argv.extend(f.extra_args.iter().cloned());
+    Ok(Chain { family: Family::SdxlBase, argv, step_prefix: "SDXL_NATIVE_STEP", total_steps: p.steps, image, report })
 }
 
 fn build_krea2_chain(cfg: &Config, p: &JobParams, work: &Path, family: Family) -> Result<Chain, String> {
@@ -520,7 +636,7 @@ fn build_krea2_chain(cfg: &Config, p: &JobParams, work: &Path, family: Family) -
         fs::write(&path, &p.negative).map_err(|e| format!("cannot write negative: {e}"))?;
         negative_file = path.to_string_lossy().into_owned();
     }
-    let script = repository_root().join("scripts/krea2_chain.sh");
+    let script = PathBuf::from(&k.runner);
     let argv = vec![
         script.to_string_lossy().into_owned(),
         work.to_string_lossy().into_owned(),
@@ -850,7 +966,8 @@ fn handle_start(cfg: &Config, wire: &Wire, rx: &Receiver<Msg>, tx: &Sender<Msg>,
         return true;
     }
     let chain = match family {
-        Family::Flux2KleinBase9b => build_flux2_chain(cfg, &p, &work),
+        Family::Flux2KleinBase9b | Family::Flux2KleinBase4b => build_flux2_chain(cfg, &p, &work, family),
+        Family::SdxlBase => build_sdxl_chain(cfg, &p, &work),
         Family::Krea2Turbo | Family::Krea2Raw => build_krea2_chain(cfg, &p, &work, family),
         Family::Stub => unreachable!(),
     };
@@ -990,12 +1107,24 @@ mod tests {
         assert_eq!(parse_step("FLUX2_NATIVE_STEP step=3/50 cfg_batch_ms=1.0", "FLUX2_NATIVE_STEP"), Some((3, 50)));
         assert_eq!(parse_step("KREA2_NATIVE_STEP step=8/8 x", "FLUX2_NATIVE_STEP"), None);
         assert_eq!(parse_step("noise", "FLUX2_NATIVE_STEP"), None);
+        assert_eq!(parse_step("SDXL_NATIVE_STEP step=25/25 ms=7.2", "SDXL_NATIVE_STEP"), Some((25, 25)));
+        assert_eq!(parse_step("SDXL_STEP 0 sigma=1", "SDXL_NATIVE_STEP"), None);
     }
 
     #[test]
     fn family_resolution() {
         assert_eq!(resolve_family("stub", "").unwrap(), Family::Stub);
+        assert_eq!(resolve_family("sd_xl_base_1.0", "").unwrap(), Family::SdxlBase);
+        assert_eq!(resolve_family("sdxl-base-1.0", "/models/sd_xl_base_1.0.safetensors").unwrap(), Family::SdxlBase);
+        assert!(resolve_family("sd_xl_base_1.0", "/models/flux-2-klein-base-4b.safetensors").is_err());
+        assert!(resolve_family("sdxl_unet_bf16", "").is_err());
         assert_eq!(resolve_family("flux-2-klein-base-9b", "").unwrap(), Family::Flux2KleinBase9b);
+        assert_eq!(resolve_family("flux-2-klein-base-4b", "").unwrap(), Family::Flux2KleinBase4b);
+        assert_eq!(resolve_family("FLUX.2-klein-base-4B", "").unwrap(), Family::Flux2KleinBase4b);
+        assert!(resolve_family("flux-2-klein-base-4b", "/m/flux-2-klein-base-9b.safetensors").is_err());
+        for model in ["flux-2-klein-4b", "flux-2-klein-9b", "flux-2-klein-9b-kv", "flux-2-klein-base-9b_fp8_e4m3fn", "flux2-dev"] {
+            assert!(resolve_family(model, "").is_err(), "must not substitute Base weights for {model}");
+        }
         assert_eq!(resolve_family("x", "/m/FLUX.2-klein-base-9B/flux-2-klein-base-9b.safetensors").unwrap(), Family::Flux2KleinBase9b);
         assert_eq!(resolve_family("krea2-turbo", "").unwrap(), Family::Krea2Turbo);
         assert_eq!(resolve_family("krea2-raw", "").unwrap(), Family::Krea2Raw);
@@ -1009,6 +1138,95 @@ mod tests {
         assert_eq!(&out[..8], &png[..8]);
         assert!(out.windows(4).any(|w| w == b"tEXt"));
         assert_eq!(out.len(), png.len() + 12 + "serenity.genparams.v1".len() + 1 + 7);
+    }
+
+    #[test]
+    fn klein_chains_select_exact_variant_and_refuse_substitution() {
+        let directory = std::env::temp_dir().join(format!("difc-klein-chain-test-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let four = directory.join("flux-2-klein-base-4b.safetensors");
+        let nine = directory.join("flux-2-klein-base-9b.safetensors");
+        let vae = directory.join("vae.safetensors");
+        for path in [&four, &nine, &vae] { fs::write(path, b"routing fixture only").unwrap(); }
+        let profile = |checkpoint: &Path, cache: &str| json!({
+            "model_dir": directory, "text_encoder_dir": directory, "tokenizer_dir": directory,
+            "transformer_checkpoint": checkpoint, "vae_checkpoint": vae,
+            "cache_dir": directory.join(cache), "extra_args": ["--resident-plan-mib", "20000"]
+        });
+        let mut cfg: Config = serde_json::from_value(json!({
+            "compiler_build": directory,
+            "flux2_klein_base_4b": profile(&four, "four-cache"),
+            "flux2_klein_base_9b": profile(&nine, "nine-cache")
+        })).unwrap();
+        let mut p = JobParams::default();
+        p.prompt = "a real prompt passed unchanged".into();
+        p.width = 1024; p.height = 1024; p.steps = 50; p.cfg = 4.0;
+        for (family, model, checkpoint) in [
+            (Family::Flux2KleinBase4b, "klein4b", &four),
+            (Family::Flux2KleinBase9b, "klein9b", &nine),
+        ] {
+            p.checkpoint_path = checkpoint.to_string_lossy().into_owned();
+            let chain = build_flux2_chain(&cfg, &p, &directory, family).unwrap();
+            let value = |flag: &str| chain.argv[chain.argv.iter().position(|v| v == flag).unwrap() + 1].clone();
+            assert_eq!(chain.family, family);
+            assert_eq!(value("--flux2-model"), model);
+            assert_eq!(value("--transformer-checkpoint"), p.checkpoint_path);
+            assert_eq!(value("--prompt"), p.prompt);
+            assert_eq!(value("--steps"), "50");
+            assert_eq!(value("--guidance"), "4");
+            assert!(chain.argv.contains(&"--text-encoder-dir".into()));
+        }
+        p.checkpoint_path = nine.to_string_lossy().into_owned();
+        assert!(build_flux2_chain(&cfg, &p, &directory, Family::Flux2KleinBase4b).err().unwrap().contains("substitute"));
+        p.checkpoint_path.clear();
+        p.cfg = f64::NAN;
+        assert!(build_flux2_chain(&cfg, &p, &directory, Family::Flux2KleinBase4b).err().unwrap().contains("CFG"));
+        p.cfg = 4.0;
+        cfg.flux2_klein_base_4b.as_mut().unwrap().extra_args = vec!["--steps".into(), "4".into()];
+        assert!(build_flux2_chain(&cfg, &p, &directory, Family::Flux2KleinBase4b).err().unwrap().contains("override --steps"));
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn sdxl_chain_preserves_prompt_negative_and_refuses_unsupported_requests() {
+        let directory = std::env::temp_dir().join(format!("difc-sdxl-chain-test-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let checkpoint = directory.join("sd_xl_base_1.0.safetensors");
+        let other = directory.join("other.safetensors");
+        for path in [&checkpoint, &other, &directory.join("vocab.json"), &directory.join("merges.txt")] {
+            fs::write(path, b"routing fixture only").unwrap();
+        }
+        let mut cfg: Config = serde_json::from_value(json!({"compiler_build": directory,
+            "sdxl": {"checkpoint": checkpoint, "tokenizer_dir": directory, "cache_dir": directory.join("cache"),
+                     "extra_args": ["--unet-dtype", "f16", "--vae-dtype", "bf16"]}})).unwrap();
+        let mut p = JobParams::default();
+        p.prompt = "a sunlit ceramic teapot".into(); p.negative = "blurry, text".into();
+        p.width = 1024; p.height = 1024; p.steps = 50; p.cfg = 7.0;
+        p.sampler = "euler".into(); p.scheduler = "normal".into(); p.seed = 4242;
+        p.checkpoint_path = checkpoint.to_string_lossy().into_owned();
+        let chain = build_sdxl_chain(&cfg, &p, &directory).unwrap();
+        let value = |flag: &str| &chain.argv[chain.argv.iter().position(|v| v == flag).unwrap() + 1];
+        assert!(chain.argv[0].ends_with("/difsdxlsample"));
+        assert_eq!(value("--checkpoint"), &p.checkpoint_path);
+        assert_eq!(value("--prompt"), &p.prompt); assert_eq!(value("--negative"), &p.negative);
+        assert_eq!(value("--steps"), "50"); assert_eq!(value("--cfg"), "7");
+        assert_eq!(value("--seed"), "4242"); assert_eq!(value("--width"), "1024");
+        assert_eq!(chain.step_prefix, "SDXL_NATIVE_STEP");
+        p.scheduler = "karras".into();
+        assert!(build_sdxl_chain(&cfg, &p, &directory).err().unwrap().contains("normal"));
+        p.scheduler = "normal".into(); p.cfg = f64::NAN;
+        assert!(build_sdxl_chain(&cfg, &p, &directory).is_err());
+        p.cfg = 7.0; p.init_image = "source.png".into();
+        assert!(build_sdxl_chain(&cfg, &p, &directory).err().unwrap().contains("init_image"));
+        p.init_image.clear(); p.checkpoint_path = other.to_string_lossy().into_owned();
+        assert!(build_sdxl_chain(&cfg, &p, &directory).err().unwrap().contains("substitute"));
+        p.checkpoint_path.clear();
+        cfg.sdxl.as_mut().unwrap().extra_args = vec!["--steps".into(), "1".into()];
+        assert!(build_sdxl_chain(&cfg, &p, &directory).err().unwrap().contains("extra_args"));
+        cfg.sdxl.as_mut().unwrap().extra_args.clear();
+        cfg.sdxl.as_mut().unwrap().tokenizer_dir = directory.join("missing").to_string_lossy().into_owned();
+        assert!(build_sdxl_chain(&cfg, &p, &directory).err().unwrap().contains("artifact missing"));
+        fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

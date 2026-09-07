@@ -1,0 +1,50 @@
+{
+  "extends": "difc.json",
+  "minimax_h3": {
+    "checkpoint": "${home}/.serenity/models/checkpoints/MiniMax-H3/Ref2VA",
+    "fixture_dir": "${repo}/output/cache/h3-ref2va-832x480x124",
+    "conditioner_bundle": "${minimax_h3.fixture_dir}/conditioner.difbind",
+    "denoiser_bundle": "${minimax_h3.fixture_dir}/denoiser.difbind",
+    "modulation_cache": "${minimax_h3.fixture_dir}/native-modcache-ref2va-steps20-blocks50.safetensors",
+    "convrot_int8": "${minimax_h3.fixture_dir}/native-convrot-h256-ref2va-blocks50.safetensors",
+    "int8_route": "w8a8",
+    "w8a8_cache": "${minimax_h3.checkpoint}/serenity_runtime_cache_v1/resident_w8a8_row_blocks_50.safetensors",
+    "profile": { "task": "ref2va", "tasks": ["ref2va"], "timestep_tables": 3 },
+    "policy": { "streamed_keep_mapped_pages": false },
+    "keyframes": {
+      "vision_bundle": "${minimax_h3.fixture_dir}/vision.difbind",
+      "modulation_cache": "${minimax_h3.modulation_cache}"
+    },
+    "references": {
+      "reference_video_vae": true,
+      "reference_audio_vae": true,
+      "stage_script": "${repo}/scripts/h3-references.sh",
+      "audio_encoder": {
+        "tool": "${compiler_build}/difaudioencode",
+        "config": "${repo}/config/h3-audio-encoder.json",
+        "checkpoint": "${minimax_h3.checkpoint}/audio_vae/model.safetensors",
+        "ffmpeg": "/usr/bin/ffmpeg",
+        "ffprobe": "/usr/bin/ffprobe",
+        "sampling_rate": 32000,
+        "channels": 2,
+        "min_duration_seconds": 2,
+        "max_duration_seconds": 15,
+        "modulation_cache": "${minimax_h3.fixture_dir}/native-modcache-ref2va-audio-steps20-blocks50.safetensors",
+        "timestep_tables": 4,
+        "condition_timestep": "1.0"
+      },
+      "preparation_runner": "${repo}/scripts/prepare-h3-ref2va.sh",
+      "input_policy": "creator_lanczos_2048_short_edge",
+      "image_short_edge": 2048,
+      "posterior_seed": 42,
+      "sealed_conditioner_source": "${minimax_h3.prepared_source_root}/ref2va-native/conditioner/qwen3vl-mm-s1751-l50.difbind",
+      "sealed_vision_source": "${minimax_h3.prepared_source_root}/ref2va-native/vision/qwen3vl-vision-t1h48w84.difbind",
+      "kinds": ["image", "audio"],
+      "max_images": 9,
+      "max_videos": 3,
+      "max_audios": 3,
+      "max_total": 12,
+      "condition_timestep": "0.999"
+    }
+  }
+}

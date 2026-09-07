@@ -9,6 +9,7 @@ name = "serenity_worker_difc"
 path = "src/main.rs"
 
 [dependencies]
+difc-config = { path = "../difc-config" }
 serenity-wire = { path = "../wire" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

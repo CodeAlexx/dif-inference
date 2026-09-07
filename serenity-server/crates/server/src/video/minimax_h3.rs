@@ -7,13 +7,19 @@
 
 use super::*;
 
-pub(super) const MINIMAX_H3_REQUEST_PROFILES_JSON: &str =
-    include_str!("../../../../../serenitymojo/configs/minimax_h3_request_profiles.json");
+fn h3_config_string(key: &str) -> &'static str {
+    difc_config::string(difc_config::current().expect("validated deployment config"), key)
+        .expect("required H3 deployment setting")
+}
 
-pub(super) const MINIMAX_H3_REQUEST_RUNNER: &str = "output/bin/minimax_h3_serenity_runtime";
+pub(super) fn minimax_h3_runner() -> &'static str {
+    h3_config_string("minimax_h3.runner")
+}
 pub(super) const MINIMAX_H3_INT8_FAST_SHIM: &str = "output/lib/libserenity_minimax_h3_int8.so";
 pub(super) const MINIMAX_H3_PRODUCT_GATE: &str = "output/checks/minimax_h3_product_gate.json";
 pub(super) const MINIMAX_H3_MODEL_ROOT: &str = "checkpoints/MiniMax-H3/FL2VA";
+pub(super) const MINIMAX_H3_CONTROLNET_NAME: &str =
+    "MiniMax-H3-Fun-Controlnet-Union.safetensors";
 pub(super) const MINIMAX_H3_ENCODER_CACHE: &str =
     "checkpoints/MiniMax-H3/FL2VA/text_encoder/serenity_int8_rowscale_v1";
 pub(super) const MINIMAX_H3_CONDITIONING_CACHE: &str = "checkpoints/MiniMax-H3/FL2VA/serenity_runtime_cache_v1/conditioning_ff21f1ebd1c73098_int8_bf16_output.bin";
@@ -86,16 +92,16 @@ fn minimax_h3_warm_submit(
             .env("MEM_MAX", "24G")
             .env("MEM_HIGH", "infinity")
             .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-            .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-            .env("CUDA_MODULE_LOADING", "EAGER")
-            .env("LD_BIND_NOW", "1")
-            .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1")
+            .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+            .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+            .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+            .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"))
             .arg("--serve")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::from(serve_log))
             .stderr(std::process::Stdio::from(serve_err));
         if let Some(path) = attention_dso {
-            cmd.env("SERENITY_COMFY_KITCHEN_CUDA", path);
+            cmd.env("H3_DENSE_INT8_KERNEL_PATH", path);
         }
         tracing::info!("spawning warm MiniMax-H3 denoise worker");
         *guard = Some(cmd.spawn()?);
@@ -237,16 +243,15 @@ pub(super) fn minimax_h3_request_profile_registry() -> &'static MiniMaxH3Request
     static REGISTRY: std::sync::OnceLock<MiniMaxH3RequestProfileRegistry> =
         std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let registry: MiniMaxH3RequestProfileRegistry =
-            serde_json::from_str(MINIMAX_H3_REQUEST_PROFILES_JSON)
-                .expect("embedded MiniMax-H3 request profile registry must be valid JSON");
+        let mut registry: MiniMaxH3RequestProfileRegistry =
+            serde_json::from_str(&std::fs::read_to_string(h3_config_string("minimax_h3.request_profiles"))
+                .expect("configured H3 profile JSON must exist"))
+                .expect("configured H3 request profile registry must be valid JSON");
+        registry.runner = minimax_h3_runner().to_string();
+        registry.default_profile = h3_config_string("minimax_h3.profile.id").to_string();
         assert_eq!(
             registry.schema, "serenity.minimax_h3.request_profiles.v3",
             "embedded MiniMax-H3 request profile registry schema mismatch"
-        );
-        assert_eq!(
-            registry.runner, MINIMAX_H3_REQUEST_RUNNER,
-            "embedded MiniMax-H3 registry must select the unified request runner"
         );
         assert!(
             ["int8-fast", "int8", "bf16"]
@@ -521,7 +526,7 @@ fn minimax_h3_gpu_memory() -> Option<MiniMaxH3GpuMemory> {
 }
 
 pub(super) fn minimax_h3_low_vram_mode(memory: Option<&MiniMaxH3GpuMemory>) -> bool {
-    memory.is_some_and(|memory| memory.total_mib <= MINIMAX_H3_LOW_VRAM_TOTAL_MIB)
+    memory.is_some_and(|memory| memory.total_mib <= difc_config::current().expect("deployment config")["minimax_h3"]["policy"]["low_vram_total_mib"].as_u64().expect("low_vram_total_mib"))
 }
 
 pub(super) fn minimax_h3_runtime_resident_blocks_for_memory(
@@ -545,12 +550,12 @@ pub(super) fn minimax_h3_low_vram_admission(
     if !minimax_h3_low_vram_mode(Some(memory)) {
         return Ok(());
     }
-    if memory.free_mib >= MINIMAX_H3_LOW_VRAM_MIN_FREE_MIB {
+    if memory.free_mib >= difc_config::current().expect("deployment config")["minimax_h3"]["policy"]["low_vram_min_free_mib"].as_u64().expect("low_vram_min_free_mib") {
         return Ok(());
     }
     Err(format!(
         "MiniMax-H3 needs at least {} MiB free on this {} MiB GPU for its streamed low-VRAM path, but only {} MiB is free. Finish or close another GPU workload and retry; Serenity Studio is still running and no model was unloaded outside this app",
-        MINIMAX_H3_LOW_VRAM_MIN_FREE_MIB, memory.total_mib, memory.free_mib,
+        difc_config::current().expect("deployment config")["minimax_h3"]["policy"]["low_vram_min_free_mib"], memory.total_mib, memory.free_mib,
     ))
 }
 
@@ -670,21 +675,11 @@ pub(super) fn minimax_h3_continuation_source(
 }
 
 pub(super) fn minimax_h3_conditioned_runner(task: &str, quant: &str) -> Option<String> {
-    if !matches!(task, "i2va" | "l2va" | "fl2va" | "ref2va")
-        || !matches!(quant, "bf16" | "int8" | "int8-fast")
-    {
-        return None;
+    if matches!(task, "i2va" | "l2va" | "fl2va" | "ref2va" | "continue") && matches!(quant, "bf16" | "int8" | "int8-fast") {
+        return Some(minimax_h3_runner().to_string());
     }
-    let suffix = if quant == "int8-fast" {
-        "int8_fast"
-    } else {
-        quant
-    };
-    Some(if task == "ref2va" {
-        format!("output/bin/minimax_h3_ref2va_768x768x124_{suffix}")
-    } else {
-        format!("output/bin/minimax_h3_{task}_768x768x124_{suffix}")
-    })
+    // Unported tasks must not advertise an invented Mojo executable path.
+    None
 }
 
 pub(super) fn minimax_h3_request_media_path(
@@ -926,8 +921,19 @@ pub(super) fn stage_minimax_h3_ref2va_audio_reference(
     out_dir: &std::path::Path,
     index: usize,
 ) -> Result<std::path::PathBuf, String> {
+    stage_minimax_h3_ref2va_audio_reference_with_config(source_path, out_dir, index, "ffmpeg", 32000)
+}
+
+fn stage_minimax_h3_ref2va_audio_reference_with_config(
+    source_path: &std::path::Path,
+    out_dir: &std::path::Path,
+    index: usize,
+    ffmpeg: &str,
+    sampling_rate: u32,
+) -> Result<std::path::PathBuf, String> {
     let prepared_path = out_dir.join(format!("ref_audio_input_{index}.wav"));
-    let output = std::process::Command::new("ffmpeg")
+    let sampling_rate = sampling_rate.to_string();
+    let output = std::process::Command::new(ffmpeg)
         .args([
             "-y",
             "-hide_banner",
@@ -939,7 +945,7 @@ pub(super) fn stage_minimax_h3_ref2va_audio_reference(
             "-acodec",
             "pcm_s16le",
             "-ar",
-            "32000",
+            &sampling_rate,
             "-ac",
             "2",
             &prepared_path.to_string_lossy(),
@@ -1020,141 +1026,25 @@ pub(super) fn stage_minimax_h3_ref2va_image_reference(
 /// programs). Read from config/difc.json so the server and the runner agree.
 /// The ConvRot INT8 pack the compiler chain uses instead of a resident store.
 pub(super) fn difc_h3_convrot_pack() -> Option<std::path::PathBuf> {
-    let cfg_path = std::env::var_os("DIFC_CONFIG")
+    difc_config::current().ok().and_then(|doc| difc_config::string(doc, "minimax_h3.convrot_int8").ok())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| repo_path("config/difc.json"));
-    let doc: Value = serde_json::from_str(&std::fs::read_to_string(cfg_path).ok()?).ok()?;
-    doc.get("minimax_h3")?
-        .get("convrot_int8")?
-        .as_str()
-        .map(std::path::PathBuf::from)
-}
-
-pub(super) fn difc_h3_prerequisites() -> Vec<std::path::PathBuf> {
-    let cfg_path = std::env::var_os("DIFC_CONFIG")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| repo_path("config/difc.json"));
-    let Ok(text) = std::fs::read_to_string(&cfg_path) else {
-        return vec![cfg_path];
-    };
-    let Ok(doc) = serde_json::from_str::<Value>(&text) else {
-        return vec![cfg_path];
-    };
-    let build = doc.get("compiler_build").and_then(Value::as_str).unwrap_or("");
-    let h3 = doc.get("minimax_h3").cloned().unwrap_or(Value::Null);
-    let fixture = h3.get("fixture_dir").and_then(Value::as_str).unwrap_or("");
-    let mut out = Vec::new();
-    for tool in ["diftokenize", "difcondition", "difc", "difweights", "difh3noise", "difh3infer", "difvaedecode", "difaudiodecode", "difh3media"] {
-        out.push(std::path::Path::new(build).join(tool));
-    }
-    for file in ["conditioner-s439.difbind", "h3-832x480x124-t439-tables2-exact-cudnn.difbind", "decoder-native-tile-l36.difir", "decoder-native-tile-l36.difbind", "audio.difir", "audio.difbind"] {
-        out.push(std::path::Path::new(fixture).join(file));
-    }
-    if let Some(convrot) = h3.get("convrot_int8").and_then(Value::as_str) {
-        out.push(std::path::PathBuf::from(convrot));
-    }
-    out
 }
 
 pub(super) fn minimax_h3_conditioned_missing(task: &str, quant: &str) -> Vec<String> {
-    let mut missing = Vec::new();
-    match minimax_h3_conditioned_runner(task, quant) {
-        Some(runner) if bin_x(&runner) => {}
-        Some(runner) => missing.push(runner),
-        None => missing.push(format!("unsupported MiniMax-H3 task={task} quant={quant}")),
+    match difc_config::current() {
+        Ok(doc) => difc_config::h3_task_missing(doc, task, quant),
+        Err(e) => vec![e],
     }
-    if !bin_x(MINIMAX_H3_CONDITIONED_DECODE_RUNNER) {
-        missing.push(MINIMAX_H3_CONDITIONED_DECODE_RUNNER.to_string());
-    }
-    let root = model_path(if task == "ref2va" {
-        MINIMAX_H3_REF2VA_MODEL_ROOT
-    } else {
-        MINIMAX_H3_MODEL_ROOT
-    });
-    for relative in [
-        "transformer/model.safetensors.index.json",
-        "text_encoder/model.safetensors.index.json",
-        "text_encoder/config.json",
-        "processor/preprocessor_config.json",
-        "audio_vae/model.safetensors",
-        "video_vae/source/model.safetensors",
-    ] {
-        let path = root.join(relative);
-        if !nonempty_file(&path) {
-            missing.push(path.to_string_lossy().into_owned());
-        }
-    }
-    if !minimax_h3_encoder_cache_complete() {
-        missing.push(
-            model_path(MINIMAX_H3_ENCODER_CACHE)
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    if quant != "bf16" {
-        let cache_builder = if task == "ref2va" {
-            MINIMAX_H3_REF2VA_RUNTIME_CACHE_RUNNER
-        } else {
-            MINIMAX_H3_REQUEST_RUNNER
-        };
-        if minimax_h3_resident_cache_path(quant, task == "ref2va")
-            .is_some_and(|path| !nonempty_file(&path))
-            && !bin_x(cache_builder)
-        {
-            missing.push(cache_builder.to_string());
-        }
-    }
-    // Modulation and resident stores are generated acceleration caches. They
-    // are not model files and must never prevent the installed model or its
-    // controls from loading.
-    for tool in difc_h3_prerequisites() {
-        if !nonempty_file(&tool) {
-            missing.push(tool.to_string_lossy().into_owned());
-        }
-    }
-    missing
 }
 
 pub(super) fn minimax_h3_missing(profile: &MiniMaxH3RequestProfile, quant: &str) -> Vec<String> {
-    let mut missing = Vec::new();
-    let runner = minimax_h3_request_runner(profile, quant);
-    if let Some(runner) = runner {
-        if !bin_x(runner) {
-            missing.push(runner.to_string());
-        }
-    } else {
-        missing.push(format!("{} runner for quant={quant}", profile.id));
-    }
-    let root = model_path(MINIMAX_H3_MODEL_ROOT);
-    for relative in [
-        "transformer/model.safetensors.index.json",
-        "text_encoder/model.safetensors.index.json",
-        "audio_vae/model.safetensors",
-        "video_vae/source/model.safetensors",
-    ] {
-        let path = root.join(relative);
-        if !nonempty_file(&path) {
-            missing.push(path.to_string_lossy().into_owned());
-        }
-    }
-    if !minimax_h3_encoder_cache_complete() {
-        missing.push(
-            model_path(MINIMAX_H3_ENCODER_CACHE)
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    // The compiled runner links both runtime libraries in every precision
-    // mode. These and the actual weights are hard prerequisites; generated
-    // conditioning/modulation/resident caches and quality reports are not.
-    for tool in difc_h3_prerequisites() {
-        if !nonempty_file(&tool) {
-            missing.push(tool.to_string_lossy().into_owned());
-        }
+    let doc = match difc_config::current() { Ok(doc) => doc, Err(e) => return vec![e] };
+    let mut missing = difc_config::h3_missing(doc, quant);
+    if profile.id != doc["minimax_h3"]["profile"]["id"].as_str().unwrap_or("") {
+        missing.push(format!("profile {} is not selected by minimax_h3.profile.id", profile.id));
     }
     missing
 }
-
 pub(super) fn minimax_h3_profile_mode_supported(
     profile: &MiniMaxH3RequestProfile,
     quant: &str,
@@ -1201,113 +1091,95 @@ pub(super) fn minimax_h3_profile_document(profile: &MiniMaxH3RequestProfile) -> 
     })
 }
 
+pub(super) fn compiler_h3_geometry_document() -> Value {
+    let doc = difc_config::current().expect("deployment config");
+    let p = &doc["minimax_h3"]["profile"];
+    let seconds = p["frames"].as_f64().unwrap() / p["fps"].as_f64().unwrap();
+    json!({
+        "shape_policy":"sealed_native_profile",
+        "width_min":p["width"], "width_max":p["width"],
+        "height_min":p["height"], "height_max":p["height"],
+        "dimension_step":32,
+        "resolutions":[{"width":p["width"], "height":p["height"], "label":p["id"]}],
+        "resolution_role":"sealed_allowlist",
+        "seconds_min":seconds, "seconds_max":seconds,
+        "fps_min":p["fps"], "fps_max":p["fps"],
+        "frames":p["frames"], "steps":p["steps"],
+        "long_context_policy":"not_implemented"
+    })
+}
+
+pub(super) fn compiler_h3_features_document() -> Value {
+    let doc = difc_config::current().expect("deployment config");
+    let lora = &doc["minimax_h3"]["lora"];
+    let control = &doc["minimax_h3"]["control"];
+    let control_ready = control["enabled"] == true &&
+        ["checkpoint", "stage_script", "media_program", "ffmpeg", "ffprobe", "encoder_source_bundle"].iter()
+            .all(|key| control[*key].as_str().is_some_and(|p| nonempty_file(std::path::Path::new(p))));
+    json!({
+        "lora":{"available":lora["enabled"] == true,"max_count":lora["max_count"],
+            "max_abs_scale":lora["max_abs_scale"],"mode":"immutable_base_activation_overlay",
+            "validation":"cpu_and_tiny_cuda_mechanics; full_model_quality_pending"},
+        "controlnet":{"available":control_ready,"max_count":control["max_count"],
+            "max_abs_strength":control["max_abs_strength"],"preprocessors":control["preprocessors"],"task_modes":["t2va"],
+            "resize_modes":control["resize_modes"],"defaults":control["defaults"],
+            "profile":doc["minimax_h3"]["profile"],
+            "assets":{"model":doc["minimax_h3"]["checkpoint"],
+                "controlnet":control["checkpoint"],
+                "clip":doc["minimax_h3"]["conditioner_bundle"],
+                "video_vae":doc["minimax_h3"]["video_bundle"],
+                "audio_vae":doc["minimax_h3"]["audio_bundle"]},
+            "inpainting":true,"input_policy":control["input_policy"]}
+    })
+}
+
 pub(super) fn minimax_h3_conditioned_task_document(task: &str, label: &str) -> Value {
     let fast_missing = minimax_h3_conditioned_missing(task, "int8-fast");
     let quality_missing = minimax_h3_conditioned_missing(task, "int8");
     let bf16_missing = minimax_h3_conditioned_missing(task, "bf16");
-    let fast_ready = fast_missing.is_empty();
-    let quality_ready = quality_missing.is_empty();
-    let bf16_ready = bf16_missing.is_empty();
+    let selected = difc_config::h3_task_document(difc_config::current().expect("deployment config"), task);
+    let doc = selected.as_ref().unwrap_or_else(|_| difc_config::current().expect("deployment config"));
+    let p = &doc["minimax_h3"]["profile"];
     json!({
-        "id": task,
-        "label": label,
-        "available": fast_ready || quality_ready || bf16_ready,
+        "id": task, "label": label,
+        "available": fast_missing.is_empty() || quality_missing.is_empty() || bf16_missing.is_empty(),
         "available_modes": {
-            "int8-fast": fast_ready,
-            "int8": quality_ready,
-            "bf16": bf16_ready,
+            "int8-fast": fast_missing.is_empty(), "int8": quality_missing.is_empty(), "bf16": bf16_missing.is_empty()
         },
-        "missing": {
-            "int8-fast": fast_missing,
-            "int8": quality_missing,
-            "bf16": bf16_missing,
-        },
+        "missing": {"int8-fast":fast_missing, "int8":quality_missing, "bf16":bf16_missing},
         "runners": {
-            "int8-fast": minimax_h3_conditioned_runner(task, "int8-fast"),
-            "int8": minimax_h3_conditioned_runner(task, "int8"),
-            "bf16": minimax_h3_conditioned_runner(task, "bf16"),
+            "int8-fast":minimax_h3_conditioned_runner(task, "int8-fast"),
+            "int8":minimax_h3_conditioned_runner(task, "int8"),
+            "bf16":minimax_h3_conditioned_runner(task, "bf16")
         },
-        "geometry": {
-            "shape_policy": "h3_base_adapt_shape_v1",
-            "base_short_edge": MINIMAX_H3_BASE_SHORT_EDGE,
-            "max_pixels": MINIMAX_H3_NATIVE_MAX_PIXELS,
-            "width_min": MINIMAX_H3_MIN_DIMENSION,
-            "width_max": MINIMAX_H3_MAX_DIMENSION,
-            "height_min": MINIMAX_H3_MIN_DIMENSION,
-            "height_max": MINIMAX_H3_MAX_DIMENSION,
-            "dimension_step": MINIMAX_H3_DIMENSION_STEP,
-            "resolutions": minimax_h3_native_resolution_documents(),
-            "resolution_role": "tested_presets_not_an_exhaustive_allowlist",
-            "seconds_min": MINIMAX_H3_MIN_SECONDS,
-            "seconds_max": if task == "ref2va" {
-                MINIMAX_H3_TRAINED_MAX_SECONDS
-            } else {
-                MINIMAX_H3_CONDITIONED_MAX_SECONDS
-            },
-            "trained_seconds_max": MINIMAX_H3_TRAINED_MAX_SECONDS,
-            "long_context_max_sequence_tokens": MINIMAX_H3_LONG_CONTEXT_MAX_SEQUENCE_TOKENS,
-            "long_context_policy": if task == "ref2va" {
-                "unavailable_for_variable_reference_pack"
-            } else {
-                "experimental_single_pass_resolution_duration_tradeoff"
-            },
-            "fps_min": 1,
-            "fps_max": 120,
-        },
-        "steps": 20,
-        "include_audio": true,
-        "gpu_vision_only": true,
-        "reference_only": task == "ref2va",
-        "reference_inputs": if task == "ref2va" {
-            Some(json!({
-                "ordered": true,
-                "max_combined": MINIMAX_H3_REF2VA_MAX_REFERENCES,
-                "image_max": MINIMAX_H3_REF2VA_MAX_IMAGES,
-                "video_max": MINIMAX_H3_REF2VA_MAX_VIDEOS,
-                "audio_max": MINIMAX_H3_REF2VA_MAX_AUDIOS,
-                "video_seconds_each": [MINIMAX_H3_REF2VA_REFERENCE_MIN_SECONDS, MINIMAX_H3_REF2VA_REFERENCE_MAX_SECONDS],
-                "audio_seconds_each": [MINIMAX_H3_REF2VA_REFERENCE_MIN_SECONDS, MINIMAX_H3_REF2VA_REFERENCE_MAX_SECONDS],
-                "duration_policy": "each reference is independently truncated to the generated duration",
-                "audio_requires_visual_reference": true,
-                "audio_use": ["reference", "reuse", "voice_timbre"],
-                "model_inference": "gpu",
-            }))
-        } else {
-            None
-        },
-        "source_becomes_first_frame": matches!(task, "i2va" | "fl2va"),
-        "reference_image_short_edge": if task == "ref2va" { Some(768) } else { None },
-        "reference_image_preprocess": if task == "ref2va" {
-            Some(json!({
-                "policy": "cover_center_crop_square_768",
-                "operation": "pixel_preprocess_only",
-                "model_inference": "gpu",
-            }))
-        } else {
-            None
-        },
-        "memory_policy": if task == "ref2va" {
-            Some(json!({
-                "policy": "sequence_adaptive_w8a8_streaming",
-                "resident_blocks_short_sequence": 4,
-                "resident_blocks_long_sequence": 0,
-                "target_sequence_limit": MINIMAX_H3_REF2VA_RESIDENT_SEQUENCE_LIMIT,
-                "model_inference": "gpu",
-            }))
-        } else {
-            None
-        },
-        "cache_policy": if task == "ref2va" { "ref2va_dit_cache_and_shared_identical_encoder_cache" } else { "reuse_existing_fl2va_resident_cache" },
-        "modulation_cache": if task == "ref2va" { MINIMAX_H3_REF2VA_MODULATION_CACHE } else { MINIMAX_H3_CONDITIONED_MODULATION_CACHE },
-        "encoder_storage": "row_scaled_int8_weights_bf16_outputs",
+        "geometry": {"width":p["width"], "height":p["height"], "frames":p["frames"], "fps":p["fps"]},
+        "input_policy": if task == "ref2va" { &doc["minimax_h3"]["references"]["input_policy"] }
+                        else { &doc["minimax_h3"]["keyframes"]["input_policy"] },
+        "steps":p["steps"], "include_audio":true, "gpu_vision_only":true,
+        "reference_only":task == "ref2va",
+        "reference_policy": if task == "ref2va" { json!({
+            "kinds":doc["minimax_h3"]["references"]["kinds"],
+            "max_images":doc["minimax_h3"]["references"]["max_images"],
+            "max_videos":doc["minimax_h3"]["references"]["max_videos"],
+            "max_audios":doc["minimax_h3"]["references"]["max_audios"],
+            "max_total":doc["minimax_h3"]["references"]["max_total"],
+            "reference_video_vae":doc["minimax_h3"]["references"]["reference_video_vae"],
+            "reference_audio_vae":doc["minimax_h3"]["references"]["reference_audio_vae"]
+        }) } else { Value::Null },
+        "int8_route":doc["minimax_h3"]["int8_route"],
+        "modulation_cache":if matches!(task, "i2va" | "l2va" | "fl2va") {
+            doc["minimax_h3"]["keyframes"]["modulation_cache"].clone()
+        } else { Value::Null },
+        "encoder_storage":"bf16_streamed",
+        "runtime":"diffusion-compiler"
     })
 }
 
 pub(super) fn minimax_h3_continuation_task_document() -> Value {
-    let profile = minimax_h3_default_profile();
-    let fast_missing = minimax_h3_missing(profile, "int8-fast");
-    let quality_missing = minimax_h3_missing(profile, "int8");
-    let bf16_missing = minimax_h3_missing(profile, "bf16");
+    let fast_missing = minimax_h3_conditioned_missing("continue", "int8-fast");
+    let quality_missing = minimax_h3_conditioned_missing("continue", "int8");
+    let bf16_missing = minimax_h3_conditioned_missing("continue", "bf16");
+    let doc = difc_config::current().expect("deployment config");
     json!({
         "id": "continue",
         "label": "Continue previous H3 video + audio",
@@ -1322,32 +1194,14 @@ pub(super) fn minimax_h3_continuation_task_document() -> Value {
             "int8": quality_missing,
             "bf16": bf16_missing,
         },
-        "runner": MINIMAX_H3_REQUEST_RUNNER,
-        "geometry": {
-            "shape_policy": "same_resolution_as_source_latent",
-            "base_short_edge": MINIMAX_H3_BASE_SHORT_EDGE,
-            "max_pixels": MINIMAX_H3_NATIVE_MAX_PIXELS,
-            "width_min": MINIMAX_H3_MIN_DIMENSION,
-            "width_max": MINIMAX_H3_MAX_DIMENSION,
-            "height_min": MINIMAX_H3_MIN_DIMENSION,
-            "height_max": MINIMAX_H3_MAX_DIMENSION,
-            "dimension_step": MINIMAX_H3_DIMENSION_STEP,
-            "resolutions": minimax_h3_native_resolution_documents(),
-            "resolution_role": "must_match_source_job",
-            "seconds_min": MINIMAX_H3_MIN_SECONDS,
-            "seconds_max": MINIMAX_H3_CONDITIONED_MAX_SECONDS,
-            "trained_seconds_max": MINIMAX_H3_TRAINED_MAX_SECONDS,
-            "long_context_max_sequence_tokens": MINIMAX_H3_LONG_CONTEXT_MAX_SEQUENCE_TOKENS,
-            "long_context_policy": "experimental_single_pass_plus_pinned_overlap",
-            "fps_min": 1,
-            "fps_max": 120,
-        },
+        "runner": minimax_h3_runner(),
+        "geometry": compiler_h3_geometry_document(),
         "motion_context": {
             "native_latent_tail": true,
             "preserve_video": true,
             "preserve_audio": true,
-            "windows": MINIMAX_H3_MOTION_CONTEXT_WINDOWS,
-            "default_frames": MINIMAX_H3_MOTION_CONTEXT_DEFAULT_FRAMES,
+            "windows": doc["minimax_h3"]["motion"]["windows"],
+            "default_frames": doc["minimax_h3"]["motion"]["default_frames"],
             "trim_overlap": true,
             "fallback": "decoded_last_frame_i2va_for_legacy_jobs",
         },
@@ -1357,10 +1211,9 @@ pub(super) fn minimax_h3_continuation_task_document() -> Value {
 }
 
 pub(super) fn minimax_h3_ld_path() -> std::ffi::OsString {
-    let mut paths = vec![
-        repo_path("output/lib"),
-        repo_path("serenitymojo/ops/cshim/lib"),
-    ];
+    let mut paths: Vec<std::path::PathBuf> = difc_config::current().ok()
+        .and_then(|doc| doc["runtime"]["library_paths"].as_array())
+        .into_iter().flatten().filter_map(Value::as_str).map(std::path::PathBuf::from).collect();
     if let Some(existing) = std::env::var_os("LD_LIBRARY_PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
@@ -1371,20 +1224,15 @@ pub(super) fn minimax_h3_ld_path() -> std::ffi::OsString {
 /// 17.96-GiB W8A8 payload is copied once into owned host RAM in bounded chunks.
 /// Model kernels still execute on GPU.
 pub(super) fn minimax_h3_capped_command(runner: &std::path::Path) -> std::process::Command {
-    let mut command = std::process::Command::new(repo_path("scripts/mem_safe_runtime.sh"));
+    let mut command = std::process::Command::new(h3_config_string("runtime.memory_wrapper"));
     command
-        .env("MEM_MAX", "24G")
-        .env("MEM_HIGH", "infinity")
-        .env("SWAP_MAX", "2G")
+        .env("MEM_MAX", h3_config_string("memory_max"))
+        .env("MEM_HIGH", h3_config_string("runtime.memory_high"))
+        .env("SWAP_MAX", h3_config_string("memory_swap_max"))
+        .env("DESKTOP_RESERVE", h3_config_string("desktop_reserve"))
+        .env("DIFC_CONFIG", difc_config::config_path())
+        .env("SERENITY_REPO_ROOT", difc_config::repository_root())
         .arg(runner);
-    if minimax_h3_low_vram_mode(minimax_h3_gpu_memory().as_ref()) {
-        command
-            .env(
-                "MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_SIZE_PERCENT",
-                MINIMAX_H3_LOW_VRAM_ALLOCATOR_PERCENT,
-            )
-            .env("MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_CHUNK_PERCENT", "100");
-    }
     command
 }
 
@@ -1445,7 +1293,7 @@ fn prepare_minimax_h3_resident_cache_if_needed(
         });
         command
     } else {
-        let runner = repo_path(MINIMAX_H3_REQUEST_RUNNER);
+        let runner = repo_path(minimax_h3_runner());
         let resident_blocks = if quant == "int8-fast" { 50 } else { 48 };
         let mut command = minimax_h3_capped_command(&runner);
         command
@@ -1472,10 +1320,10 @@ fn prepare_minimax_h3_resident_cache_if_needed(
     let status = command
         .current_dir(repo_root())
         .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-        .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-        .env("CUDA_MODULE_LOADING", "EAGER")
-        .env("LD_BIND_NOW", "1")
-        .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1")
+        .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+        .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+        .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+        .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"))
         .stdout(std::process::Stdio::from(log))
         .stderr(std::process::Stdio::from(stderr))
         .status()
@@ -1556,6 +1404,30 @@ pub(super) fn minimax_h3_progress_from_log(
                 requested_steps,
                 "Preparing AdaLN modulation cache".to_string(),
             ));
+        } else if line.contains("H3_ENCODE_CLIP clip=") {
+            // The control-media VAE encode runs for several minutes before the
+            // first denoise evaluation. Without this the H3 CT screen sat at
+            // "step 0 / N, 0%" for the whole encode and looked wedged; the
+            // runner already prints per-clip progress, it just never reached
+            // the status document.
+            if matches!(progress.as_ref(), Some((phase, _, _, _)) if phase == "denoise") {
+                continue;
+            }
+            if let Some((done, total)) = line
+                .split_once("H3_ENCODE_CLIP clip=")
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                .and_then(|clip| clip.split_once('/'))
+                .and_then(|(done, total)| {
+                    Some((done.trim().parse::<i64>().ok()?, total.trim().parse::<i64>().ok()?))
+                })
+            {
+                progress = Some((
+                    "control_encode".to_string(),
+                    done,
+                    total,
+                    format!("Encoding control video: clip {done} of {total}"),
+                ));
+            }
         } else if line.contains("resident cache: loaded block") {
             // Streamed INT8 tails may visit cache blocks between completed
             // evaluations. Cache messages must never regress a job that has
@@ -1597,6 +1469,32 @@ pub(super) fn minimax_h3_progress_from_log(
                 requested_steps,
                 format!("One-time INT8 cache build: block {block} of {total}"),
             ));
+        } else if let Some(native) = line.trim_start().strip_prefix("H3_STEP ") {
+            let evaluations = requested_steps.saturating_sub(1).max(0);
+            let Some(index) = minimax_h3_log_number(native, "index=") else {
+                continue;
+            };
+            if index >= evaluations {
+                continue;
+            }
+            let step = index + 1;
+            progress = Some((
+                "denoise".to_string(),
+                step,
+                requested_steps,
+                format!("Denoising evaluation {step} of {evaluations}"),
+            ));
+        } else if let Some(event) = line.trim().strip_prefix("[difc-h3] phase=denoise ")
+            .and_then(|tail| tail.split_whitespace().next())
+            .filter(|event| matches!(*event, "start" | "complete")) {
+            let evaluations = requested_steps.saturating_sub(1).max(0);
+            let step = if event == "complete" { evaluations } else { 0 };
+            progress = Some((
+                "denoise".to_string(),
+                step,
+                requested_steps,
+                format!("Denoising evaluation {step} of {evaluations}"),
+            ));
         } else if line.contains("phase=denoise") {
             let step = minimax_h3_log_number(line, "step=").unwrap_or(0);
             let evaluations = minimax_h3_log_number(line, "total=").unwrap_or(0);
@@ -1613,7 +1511,7 @@ pub(super) fn minimax_h3_progress_from_log(
 
 pub(super) fn validate_minimax_h3_request(body: &Value) -> Result<(), String> {
     let task = minimax_h3_task(body);
-    if !matches!(task, "t2va" | "continue") {
+    if !matches!(task, "t2va" | "continue" | "controlnet") {
         return validate_minimax_h3_conditioned_request(body, task);
     }
     let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("");
@@ -1661,6 +1559,32 @@ pub(super) fn validate_minimax_h3_request(body: &Value) -> Result<(), String> {
     if body.get("include_audio").and_then(Value::as_bool) == Some(false) {
         return Err("MiniMax-H3 always generates synchronized audio".to_string());
     }
+    if task == "controlnet" {
+        if step_cache != "exact" {
+            return Err("MiniMax-H3 ControlNet requires exact step cache".to_string());
+        }
+        let geometry = minimax_h3_runtime_geometry(body)?;
+        if geometry.fps != MINIMAX_H3_FPS || !(5.0..=15.0).contains(&geometry.duration)
+            || geometry.duration.fract() != 0.0 {
+            return Err("MiniMax-H3 ControlNet requires a whole 5 through 15 seconds at 24 FPS".into());
+        }
+        let selected = body.get("controlnet").and_then(Value::as_str).unwrap_or("");
+        if selected != MINIMAX_H3_CONTROLNET_NAME {
+            return Err(format!(
+                "MiniMax-H3 ControlNet requires the installed official {MINIMAX_H3_CONTROLNET_NAME}"
+            ));
+        }
+        let doc = difc_config::current()?;
+        let checkpoint = std::path::Path::new(difc_config::string(doc, "minimax_h3.control.checkpoint")?);
+        if !nonempty_file(checkpoint) {
+            return Err(format!("MiniMax-H3 ControlNet checkpoint is missing: {}", checkpoint.display()));
+        }
+        let controls = compiler_h3_controls(body, doc)?;
+        if controls.is_empty() { return Err("Add a control video".into()); }
+        if body.get("loras").and_then(Value::as_array).is_some_and(|rows| !rows.is_empty()) {
+            return Err("MiniMax-H3 native ControlNet currently requires the base model without LoRA overlays".into());
+        }
+    }
     if task == "continue" {
         let source = body
             .get("continue_from")
@@ -1685,6 +1609,300 @@ pub(super) fn validate_minimax_h3_request(body: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+pub(super) fn compiler_h3_request_defaults(body: &Value, doc: &Value) -> Value {
+    let mut request = body.clone();
+    let selected = difc_config::h3_task_document(doc, minimax_h3_task(body)).unwrap_or_else(|_| doc.clone());
+    if let Some(fields) = request.as_object_mut() {
+        let profile = &selected["minimax_h3"]["profile"];
+        for (key, setting) in [
+            ("task", "task"), ("width", "width"), ("height", "height"),
+            ("frames", "frames"), ("fps", "fps"), ("steps", "steps"), ("seed", "seed"),
+            ("quant", "quant"), ("attention_backend", "attention"), ("step_cache", "step_cache"),
+        ] {
+            fields.entry(key).or_insert_with(|| profile[setting].clone());
+        }
+    }
+    request
+}
+
+pub(super) fn validate_compiler_h3_request(body: &Value) -> Result<(), String> {
+    validate_compiler_h3_request_in(body, difc_config::current()?)
+}
+
+pub(super) fn validate_compiler_h3_request_in(body: &Value, doc: &Value) -> Result<(), String> {
+    let geometry = minimax_h3_runtime_geometry(body)?;
+    difc_config::h3_contract(doc, &json!({
+        "width": geometry.width, "height": geometry.height, "frames": geometry.internal_frames,
+        "fps": geometry.fps, "steps": body.get("steps").cloned().unwrap_or_else(|| doc["minimax_h3"]["profile"]["steps"].clone()),
+        "task": minimax_h3_task(body),
+        "motion_context_frames": geometry.motion_context_frames,
+        "quant": body.get("quant").cloned().unwrap_or_else(|| doc["minimax_h3"]["profile"]["quant"].clone()),
+        "attention": body.get("attention_backend").cloned().unwrap_or_else(|| doc["minimax_h3"]["profile"]["attention"].clone()),
+        "step_cache": body.get("step_cache").cloned().unwrap_or_else(|| doc["minimax_h3"]["profile"]["step_cache"].clone())
+    }))?;
+    if body.get("seed").is_some_and(|v| !v.as_u64().is_some_and(|seed| seed <= u32::MAX as u64)) {
+        return Err("H3 seed must be an integer from 0 through 4294967295".into());
+    }
+    if minimax_h3_task(body) != "controlnet"
+        && geometry.output_frames != doc["minimax_h3"]["profile"]["frames"].as_i64().unwrap() {
+        return Err("H3 output duration must match the configured frame count; trimming/resampling is not implemented by this runner yet".into());
+    }
+    let lora_args = compiler_h3_lora_args(body, doc)?;
+    let selected = difc_config::h3_task_document(doc, minimax_h3_task(body))?;
+    if !lora_args.is_empty() && selected["minimax_h3"]["int8_route"] == "w8a8"
+        && body.get("quant").unwrap_or(&selected["minimax_h3"]["profile"]["quant"]) != "bf16" {
+        return Err("The existing W8A8 loader does not support LoRA overlays; select BF16 for LoRA".into());
+    }
+    let _ = compiler_h3_controls(body, doc)?;
+    if minimax_h3_task(body) != "ref2va" && body.get("references")
+        .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|a| !a.is_empty())) {
+        return Err("H3 ordered references require the Ref2VA task; they cannot be ignored by a base task".into());
+    }
+    let _ = compiler_h3_keyframes(body, geometry.width, geometry.height)?;
+    if minimax_h3_task(body) == "ref2va" {
+        let _ = compiler_h3_references(body, doc)?;
+    }
+    Ok(())
+}
+
+pub(super) fn compiler_h3_lora_args(body: &Value, doc: &Value) -> Result<Vec<String>, String> {
+    let Some(value) = body.get("lora") else { return Ok(Vec::new()); };
+    if value.is_null() { return Ok(Vec::new()); }
+    let rows = value.as_array().ok_or("H3 lora must be an ordered array")?;
+    if rows.is_empty() { return Ok(Vec::new()); }
+    let policy = &doc["minimax_h3"]["lora"];
+    if policy["enabled"] != true { return Err("Native H3 LoRA is not enabled in deployment JSON".into()); }
+    if rows.len() as u64 > policy["max_count"].as_u64().ok_or("Missing H3 LoRA max_count")? {
+        return Err("Too many H3 LoRAs for configured policy".into());
+    }
+    let limit = policy["max_abs_scale"].as_f64().filter(|v| v.is_finite() && *v > 0.0)
+        .ok_or("Invalid H3 LoRA scale policy")?;
+    let mut args = Vec::new();
+    for row in rows {
+        if !row.is_object() { return Err("Each H3 LoRA must be an object".into()); }
+        let scale = match row.get("weight").or_else(|| row.get("strength")) {
+            None => 1.0,
+            Some(v) => v.as_f64().ok_or("H3 LoRA weight must be numeric")?,
+        };
+        if !scale.is_finite() || scale.abs() > limit { return Err("H3 LoRA weight exceeds configured finite scale range".into()); }
+        if scale as f32 == 0.0 { return Err("Native H3 LoRA weight must be nonzero; remove disabled adapters from the request".into()); }
+        let path = if let Some(path) = row.get("path").and_then(Value::as_str) {
+            minimax_h3_reference_media_path(path, "LoRA path")?
+        } else {
+            let name = row.get("name").and_then(Value::as_str).ok_or("H3 LoRA needs a name or path")?;
+            crate::models::lora_path_and_arch(name).ok_or_else(|| format!("H3 LoRA not found: {name}"))?.0
+        };
+        if !nonempty_file(&path) { return Err(format!("H3 LoRA file missing: {}", path.display())); }
+        args.push(format!("--h3-lora={}", path.display()));
+        args.push(format!("--h3-lora-scale={scale}"));
+    }
+    Ok(args)
+}
+
+pub(super) fn compiler_h3_controls(body: &Value, doc: &Value) -> Result<Vec<Value>, String> {
+    let Some(value) = body.get("controls") else { return Ok(Vec::new()); };
+    if value.is_null() { return Ok(Vec::new()); }
+    let rows = value.as_array().ok_or("H3 controls must be an ordered array")?;
+    if rows.is_empty() { return Ok(Vec::new()); }
+    let policy = &doc["minimax_h3"]["control"];
+    if policy["enabled"] != true { return Err("Native H3 ControlNet is not enabled in deployment JSON".into()); }
+    if !matches!(minimax_h3_task(body), "t2va" | "controlnet") { return Err("Native ControlNet currently supports T2VA, not combined keyframes/references/continuation".into()); }
+    if body.get("step_cache").and_then(Value::as_str).unwrap_or("exact") != "exact" {
+        return Err("ControlNet requires exact steps; cached residuals would need control-aware invalidation".into());
+    }
+    if rows.len() as u64 > policy["max_count"].as_u64().ok_or("Missing H3 control max_count")? {
+        return Err("Too many H3 controls for configured policy".into());
+    }
+    let mut result = Vec::new();
+    for row in rows {
+        let fields = row.as_object().ok_or("Each H3 control must be an object")?;
+        if fields.keys().any(|k| !["path", "strength", "start", "end", "start_percent", "end_percent", "preprocessor", "resize_mode", "canny_low", "canny_high", "source_path", "mask_path", "invert_mask"].contains(&k.as_str())) {
+            return Err("Unknown H3 ControlNet media field".into());
+        }
+        let defaults = &policy["defaults"];
+        let choice = |key: &str, allowed: &[&str]| -> Result<String, String> {
+            let value = row.get(key).unwrap_or(&defaults[key]).as_str()
+                .ok_or_else(|| format!("Missing H3 ControlNet {key} default"))?;
+            if !allowed.contains(&value) { return Err(format!("Invalid H3 ControlNet {key}: {value}")); }
+            Ok(value.to_string())
+        };
+        let preprocessor = choice("preprocessor", &["prepared", "canny"])?;
+        let resize_mode = choice("resize_mode", &["crop", "pad", "stretch"])?;
+        let threshold = |key: &str| -> Result<u64, String> {
+            row.get(key).unwrap_or(&defaults[key]).as_u64()
+                .filter(|v| *v <= 255).ok_or_else(|| format!("H3 ControlNet {key} must be an integer from 0 to 255"))
+        };
+        let canny_low = threshold("canny_low")?;
+        let canny_high = threshold("canny_high")?;
+        if canny_low >= canny_high { return Err("H3 ControlNet Canny requires low < high".into()); }
+        let number = |key: &str| -> Result<f64, String> {
+            let alias = match key { "start" => "start_percent", "end" => "end_percent", _ => key };
+            row.get(key).or_else(|| row.get(alias)).unwrap_or(&defaults[key]).as_f64().filter(|v| v.is_finite())
+                .ok_or_else(|| format!("H3 control {key} must be finite numeric data"))
+        };
+        let strength = number("strength")?;
+        let start = number("start")?;
+        let end = number("end")?;
+        if !(0.0..=1.0).contains(&start) || !(start..=1.0).contains(&end) {
+            return Err("H3 control range must satisfy 0 <= start <= end <= 1".into());
+        }
+        let media_path = |key: &str| -> Result<Option<std::path::PathBuf>, String> {
+            let Some(value) = row.get(key).filter(|v| !v.is_null()) else { return Ok(None); };
+            let raw = value.as_str().ok_or_else(|| format!("H3 control {key} must be a media path"))?;
+            if raw.trim().is_empty() { return Ok(None); }
+            let path = minimax_h3_reference_media_path(raw, key)?;
+            if !nonempty_file(&path) { return Err(format!("H3 control media missing: {}", path.display())); }
+            Ok(Some(path))
+        };
+        let path = media_path("path")?.ok_or("H3 control needs an image or video path")?;
+        let source = media_path("source_path")?;
+        let mask = media_path("mask_path")?;
+        if source.is_some() != mask.is_some() { return Err("H3 ControlNet source and mask must be supplied together".into()); }
+        let invert_mask = row.get("invert_mask").unwrap_or(&defaults["invert_mask"]).as_bool()
+            .ok_or("H3 ControlNet invert_mask must be boolean")?;
+        result.push(json!({"path":path,"strength":strength,"start":start,"end":end,
+            "preprocessor":preprocessor,"resize_mode":resize_mode,"canny_low":canny_low,"canny_high":canny_high,
+            "source_path":source,"mask_path":mask,"invert_mask":invert_mask}));
+    }
+    if result.iter().any(|row| row["strength"].as_f64() != Some(0.0)) {
+        for key in ["checkpoint", "stage_script", "media_program", "ffmpeg", "ffprobe", "encoder_source_bundle"] {
+            let path = policy[key].as_str().ok_or_else(|| format!("Missing H3 control {key}"))?;
+            if !nonempty_file(std::path::Path::new(path)) { return Err(format!("H3 control prerequisite missing: {path}")); }
+        }
+    }
+    Ok(result)
+}
+
+fn stage_compiler_h3_controls(body: &Value, out: &std::path::Path) -> Result<Vec<String>, String> {
+    let rows = compiler_h3_controls(body, difc_config::current()?)?;
+    if rows.is_empty() { return Ok(Vec::new()); }
+    let path = out.join("control-manifest.json");
+    let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|e| format!("Cannot snapshot H3 control manifest: {e}"))?;
+    serde_json::to_writer_pretty(file, &rows).map_err(|e| e.to_string())?;
+    Ok(vec![format!("--control-manifest={}", path.display())])
+}
+
+pub(super) fn compiler_h3_references(body: &Value, doc: &Value) -> Result<Vec<MiniMaxH3ReferenceInput>, String> {
+    let selected = difc_config::h3_task_document(doc, "ref2va")?;
+    let policy = &selected["minimax_h3"]["references"];
+    for field in ["reference_video_vae", "reference_audio_vae"] {
+        if !body.get(field).unwrap_or(&policy[field]).is_boolean() {
+            return Err(format!("H3 {field} must be boolean"));
+        }
+    }
+    let references = minimax_h3_ref2va_references(body)?;
+    if body.get("last_frame").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()) {
+        return Err("H3 Ref2VA does not consume a last-frame keyframe".into());
+    }
+    if body.get("references").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) &&
+        body.get("source_image").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()) {
+        return Err("Pass ordered references or legacy source_image, not both".into());
+    }
+    let limit = policy["max_total"].as_u64().ok_or("Missing H3 reference count policy")?;
+    if references.len() as u64 > limit { return Err("Too many H3 references for configured policy".into()); }
+    for kind in ["image", "video", "audio"] {
+        let count = references.iter().filter(|r| r.kind == kind).count() as u64;
+        let limit = policy[format!("max_{kind}s")].as_u64().ok_or("Missing H3 reference kind count policy")?;
+        if count > limit { return Err(format!("Too many H3 {kind} references")); }
+    }
+    for reference in &references {
+        if reference.kind == "video" || !policy["kinds"].as_array().is_some_and(|k| k.iter().any(|v| v.as_str() == Some(reference.kind.as_str()))) {
+            return Err(format!("Native Ref2VA {} ingestion is not implemented/admitted", reference.kind));
+        }
+        if reference.kind == "image" {
+            let (w,h) = image::image_dimensions(&reference.path).map_err(|e| format!("cannot read reference image: {e}"))?;
+            if w == 0 || h == 0 || u64::from(w) > 4 * u64::from(h) || u64::from(h) > 4 * u64::from(w) {
+                return Err("H3 reference aspect ratio must be between 1:4 and 4:1".into());
+            }
+        }
+    }
+    Ok(references)
+}
+
+pub(super) fn stage_compiler_h3_references(
+    body: &Value,
+    doc: &Value,
+    out: &std::path::Path,
+) -> Result<(Vec<String>, String), String> {
+    let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("");
+    if minimax_h3_task(body) != "ref2va" { return Ok((Vec::new(), prompt.to_string())); }
+    use image::ImageDecoder;
+    let references = compiler_h3_references(body, doc)?;
+    let selected = difc_config::h3_task_document(doc, "ref2va")?;
+    let policy = &selected["minimax_h3"]["references"];
+    let video_vae = body.get("reference_video_vae").unwrap_or(&policy["reference_video_vae"]).as_bool().unwrap();
+    let audio_vae = body.get("reference_audio_vae").unwrap_or(&policy["reference_audio_vae"]).as_bool().unwrap();
+    let mut args = references.iter().enumerate().map(|(i, reference)| {
+        match reference.kind.as_str() {
+            "image" => {
+                let mut decoder = image::ImageReader::open(&reference.path).map_err(|e| e.to_string())?
+                    .with_guessed_format().map_err(|e| e.to_string())?.into_decoder().map_err(|e| e.to_string())?;
+                let orientation = decoder.orientation().map_err(|e| e.to_string())?;
+                let mut pixels = image::DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
+                pixels.apply_orientation(orientation);
+                let path = out.join(format!("reference-input-{i}.png"));
+                pixels.to_rgb8().save(&path).map_err(|e| e.to_string())?;
+                Ok(format!("--reference-image={}", path.display()))
+            }
+            "audio" => {
+                if !audio_vae { return Ok(format!("--reference-audio={}", reference.path.display())); }
+                let ffmpeg = difc_config::string(&selected, "minimax_h3.references.audio_encoder.ffmpeg")?;
+                let sampling_rate = selected["minimax_h3"]["references"]["audio_encoder"]["sampling_rate"]
+                    .as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0)
+                    .ok_or("H3 reference audio sampling_rate must be a positive uint32")?;
+                let path = stage_minimax_h3_ref2va_audio_reference_with_config(
+                    &reference.path, out, i, ffmpeg, sampling_rate,
+                )?;
+                Ok(format!("--reference-audio={}", path.display()))
+            }
+            _ => Err(format!("Native Ref2VA {} ingestion is not implemented/admitted", reference.kind)),
+        }
+    }).collect::<Result<Vec<_>, String>>()?;
+    args.push(format!("--reference-video-vae={video_vae}"));
+    args.push(format!("--reference-audio-vae={audio_vae}"));
+    Ok((args, minimax_h3_ref2va_prompt_with_audio_roles(prompt, &references)))
+}
+
+/// The vision bundle is sealed for this canvas. Do not silently substitute a
+/// resize filter for the creator's antialiased bicubic keyframe preprocessing.
+pub(super) fn compiler_h3_keyframes(body: &Value, width: i64, height: i64)
+    -> Result<Vec<(&'static str, std::path::PathBuf)>, String>
+{
+    let task = minimax_h3_task(body);
+    let mut inputs = Vec::new();
+    for (key, required) in [
+        ("source_image", matches!(task, "i2va" | "fl2va")),
+        ("last_frame", matches!(task, "l2va" | "fl2va")),
+    ] {
+        if !required {
+            if task != "ref2va" && body.get(key).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty()) {
+                return Err(format!("H3 task={task} does not consume {key}"));
+            }
+            continue;
+        }
+        let path = minimax_h3_request_media_path(body, key)?;
+        let (w, h) = image::image_dimensions(&path)
+            .map_err(|e| format!("cannot read H3 {key} image: {e}"))?;
+        if i64::from(w) != width || i64::from(h) != height {
+            return Err(format!("H3 {key} must be {width}x{height}; got {w}x{h}. Native parity-checked keyframe resizing is not implemented yet"));
+        }
+        inputs.push((key, path));
+    }
+    Ok(inputs)
+}
+
+pub(super) fn stage_compiler_h3_keyframes(
+    inputs: &[(&str, std::path::PathBuf)], out_dir: &std::path::Path,
+) -> Result<Vec<String>, String> {
+    inputs.iter().map(|(key, source)| {
+        let target = out_dir.join(format!("{key}.png"));
+        let pixels = image::open(source).map_err(|e| format!("cannot decode H3 {key}: {e}"))?.to_rgb8();
+        pixels.save(&target).map_err(|e| format!("cannot stage H3 {key}: {e}"))?;
+        Ok(format!("--{}={}", key.replace('_', "-"), target.display()))
+    }).collect()
 }
 
 pub(super) fn validate_minimax_h3_conditioned_request(
@@ -1760,7 +1978,7 @@ pub(super) fn start_minimax_h3_request(
     if minimax_h3_continue_with_references(body) {
         return start_minimax_h3_conditioned_request(st, body, gpu);
     }
-    if !matches!(task, "t2va" | "continue") {
+    if !matches!(task, "t2va" | "continue" | "i2va" | "l2va" | "fl2va" | "ref2va" | "controlnet") {
         return start_minimax_h3_conditioned_request(st, body, gpu);
     }
     let continuation_source = if task == "continue" {
@@ -1785,11 +2003,6 @@ pub(super) fn start_minimax_h3_request(
     let output_fps = geometry.fps;
     let motion_context_frames = geometry.motion_context_frames;
     let trim_start_frames = geometry.trim_start_frames;
-    let prompt = body
-        .get("prompt")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
     let quant = body
         .get("quant")
         .and_then(Value::as_str)
@@ -1817,13 +2030,14 @@ pub(super) fn start_minimax_h3_request(
         .and_then(Value::as_i64)
         .unwrap_or(MINIMAX_H3_STEPS);
     let seed = body.get("seed").and_then(Value::as_u64).unwrap_or(0);
-    let runner = MINIMAX_H3_REQUEST_RUNNER.to_string();
+    let runner = minimax_h3_runner().to_string();
     let gpu_memory = minimax_h3_gpu_memory();
     if let Err(error) = minimax_h3_low_vram_admission(gpu_memory.as_ref()) {
         return err_detail(StatusCode::CONFLICT, &error);
     }
-    let resident_blocks =
-        minimax_h3_runtime_resident_blocks_for_memory(&geometry, &quant, gpu_memory.as_ref());
+    let resident_blocks = if quant == "bf16" { 0 } else {
+        difc_config::current().expect("deployment config")["minimax_h3"]["resident_layers"].as_i64().expect("resident_layers")
+    };
     let n = st
         .next_id
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -1837,12 +2051,39 @@ pub(super) fn start_minimax_h3_request(
         );
     }
     let request_path = out_dir.join("request.json");
+    let mut keyframe_args = match compiler_h3_keyframes(body, profile_width, profile_height)
+        .and_then(|inputs| stage_compiler_h3_keyframes(&inputs, &out_dir)) {
+        Ok(args) => args,
+        Err(error) => {
+            let _ = write_minimax_h3_job_status(&out_dir, "failed", "keyframe_stage", 0, steps, &error);
+            return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error);
+        }
+    };
+    let conditioned_prompt = match stage_compiler_h3_references(
+        body, difc_config::current().expect("deployment config"), &out_dir,
+    ) {
+        Ok((args, conditioned_prompt)) => {
+            keyframe_args.extend(args);
+            conditioned_prompt
+        }
+        Err(error) => return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error),
+    };
+    match compiler_h3_lora_args(body, difc_config::current().expect("deployment config")) {
+        Ok(args) => keyframe_args.extend(args),
+        Err(error) => return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error),
+    }
+    match stage_compiler_h3_controls(body, &out_dir) {
+        Ok(args) => keyframe_args.extend(args),
+        Err(error) => return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error),
+    }
     let mut request = body.clone();
     if let Some(object) = request.as_object_mut() {
-        object.insert("runner".to_string(), json!("minimax_h3_mojo_request"));
+        object.insert("runner".to_string(), json!("minimax_h3_compiler_request"));
         object.insert("profile".to_string(), json!(profile_id.clone()));
         object.insert("defer_decode".to_string(), json!(true));
-        object.insert("encoder_storage".to_string(), json!("int8"));
+        object.insert("encoder_storage".to_string(), json!("bf16_streamed"));
+        object.insert("keyframe_runner_args".to_string(), json!(keyframe_args));
+        object.insert("conditioned_prompt".to_string(), json!(conditioned_prompt));
         object.insert(
             "experimental_long_context".to_string(),
             json!(geometry.duration > MINIMAX_H3_TRAINED_MAX_SECONDS),
@@ -1905,7 +2146,7 @@ pub(super) fn start_minimax_h3_request(
     let thread_step_cache = step_cache.clone();
     let thread_runner = runner.clone();
     let thread_profile_id = profile_id.clone();
-    let thread_prompt = prompt.clone();
+    let thread_prompt = conditioned_prompt;
     let thread_task = task.to_string();
     let thread_continuation_source = continuation_source.clone();
     std::thread::spawn(move || {
@@ -1922,40 +2163,21 @@ pub(super) fn start_minimax_h3_request(
             let _ = write_minimax_h3_job_status(&thread_out_dir, "failed", phase, 0, steps, &error);
             publish(WorkerEvent::Failed { error });
         };
-        let needs_runtime_cache = minimax_h3_resident_cache_path(&thread_quant, false)
-            .is_some_and(|path| !nonempty_file(&path));
-        if needs_runtime_cache {
-            let cache_message = format!(
-                "Preparing MiniMax-H3 {} acceleration cache once on GPU",
-                thread_quant.to_uppercase()
-            );
-            let _ = write_minimax_h3_job_status(
-                &thread_out_dir,
-                "running",
-                "runtime_cache",
-                0,
-                steps,
-                &cache_message,
-            );
-            publish(WorkerEvent::Progress {
-                step: 0,
-                total: steps,
-                phase: cache_message,
-                preview: String::new(),
-            });
-            if let Err(error) =
-                prepare_minimax_h3_resident_cache_if_needed(&thread_quant, false, &thread_out_dir)
-            {
-                fail("runtime_cache", error);
-                return;
-            }
+        // This route uses only the task-selected native deployment artifacts.
+        // Never launch a legacy Mojo cache builder or check Base's cache for
+        // a request whose denoiser is actually Ref2VA.
+        let missing = difc_config::h3_task_missing(
+            difc_config::current().expect("deployment config"), &thread_task, &thread_quant);
+        if !missing.is_empty() {
+            fail("native_prerequisites", missing.join("; "));
+            return;
         }
         let message = format!(
             "Starting MiniMax-H3 {} {} DiT with {} attention and {} step cache",
             if thread_task == "continue" {
                 "native continuation"
             } else {
-                "T2VA"
+                thread_task.as_str()
             },
             thread_quant.to_uppercase(),
             thread_attention,
@@ -2014,7 +2236,9 @@ pub(super) fn start_minimax_h3_request(
             format!("--attention-backend={}", thread_attention),
             format!("--step-cache={}", thread_step_cache),
             "--defer-video-decode".to_string(),
+            format!("--task={thread_task}"),
         ];
+        runner_args.extend(keyframe_args);
         if let Some(source) = thread_continuation_source.as_ref() {
             runner_args.push(format!(
                 "--motion-context={}",
@@ -2022,9 +2246,6 @@ pub(super) fn start_minimax_h3_request(
             ));
             runner_args.push(format!("--motion-context-frames={motion_context_frames}"));
             runner_args.push(format!("--trim-start-frames={trim_start_frames}"));
-        }
-        if thread_prompt == MINIMAX_H3_TEST_PROMPT {
-            runner_args.push("--runtime-cache-exact-product-prompt".to_string());
         }
         // Warm path: hand the job line to the resident --serve worker; the
         // worker re-points its stdout at this job's runner.log itself.
@@ -2049,15 +2270,15 @@ pub(super) fn start_minimax_h3_request(
             command
                 .current_dir(repo_root())
                 .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-                .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-                .env("CUDA_MODULE_LOADING", "EAGER")
-                .env("LD_BIND_NOW", "1")
-                .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1")
+                .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+                .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+                .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+                .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"))
                 .args(&runner_args)
                 .stdout(std::process::Stdio::from(log))
                 .stderr(std::process::Stdio::from(stderr));
             if let Some(path) = thread_attention_dso.as_ref() {
-                command.env("SERENITY_COMFY_KITCHEN_CUDA", path);
+                command.env("H3_DENSE_INT8_KERNEL_PATH", path);
             }
             child_opt = Some(match command.spawn() {
                 Ok(child) => child,
@@ -2144,7 +2365,7 @@ pub(super) fn start_minimax_h3_request(
             }
         }
 
-        let decode_message = "Denoiser released; starting fresh GPU video decode and NVENC mux";
+        let decode_message = "Denoiser released; starting native video/audio decode and configured media encoder";
         let _ = write_minimax_h3_job_status(
             &thread_out_dir,
             "running",
@@ -2184,16 +2405,17 @@ pub(super) fn start_minimax_h3_request(
         decode_command
             .current_dir(repo_root())
             .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-            .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-            .env("CUDA_MODULE_LOADING", "EAGER")
-            .env("LD_BIND_NOW", "1")
-            .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1")
+            .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+            .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+            .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+            .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"))
             .arg("decode")
             .arg(&thread_out_dir)
             .arg(steps.to_string())
             .arg(seed.to_string())
             .arg("50")
             .arg("decode_video_only")
+            .arg(format!("--task={thread_task}"))
             .arg(format!("--width={profile_width}"))
             .arg(format!("--height={profile_height}"))
             .arg(format!("--frames={internal_frames}"))
@@ -2256,7 +2478,7 @@ pub(super) fn start_minimax_h3_request(
         }
         if let Some(document) = result.as_mut().and_then(Value::as_object_mut) {
             document.insert("model".to_string(), json!("minimax_h3"));
-            document.insert("runner".to_string(), json!("minimax_h3_mojo_request"));
+            document.insert("runner".to_string(), json!("minimax_h3_compiler_request"));
             document.insert("quant".to_string(), json!(thread_quant));
             document.insert("attention_backend".to_string(), json!(thread_attention));
             document.insert("step_cache".to_string(), json!(thread_step_cache));
@@ -2324,11 +2546,11 @@ pub(super) fn start_minimax_h3_request(
             "video_id": video_id,
             "prompt_id": video_id,
             "model": "minimax_h3",
-            "runner": "minimax_h3_mojo_request",
+            "runner": "minimax_h3_compiler_request",
             "task": task,
             "request_runner": runner,
             "profile": profile_id,
-            "backend": "mojo",
+            "backend": "difc",
             "quant": quant,
             "attention_backend": attention,
             "step_cache": step_cache,
@@ -2752,12 +2974,12 @@ pub(super) fn start_minimax_h3_conditioned_request(
         command
             .current_dir(repo_root())
             .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-            .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-            .env("CUDA_MODULE_LOADING", "EAGER")
-            .env("LD_BIND_NOW", "1")
-            .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1");
+            .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+            .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+            .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+            .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"));
         if let Some(path) = thread_attention_dso.as_ref() {
-            command.env("SERENITY_COMFY_KITCHEN_CUDA", path);
+            command.env("H3_DENSE_INT8_KERNEL_PATH", path);
         }
         if thread_task == "ref2va" || thread_combined_continuation {
             let prompt_path = thread_out_dir.join("ref_prompt.txt");
@@ -2934,10 +3156,10 @@ pub(super) fn start_minimax_h3_conditioned_request(
         decode_command
             .current_dir(repo_root())
             .env("LD_LIBRARY_PATH", minimax_h3_ld_path())
-            .env("CUDA_CACHE_PATH", LTX2_CUDA_CACHE)
-            .env("CUDA_MODULE_LOADING", "EAGER")
-            .env("LD_BIND_NOW", "1")
-            .env("CUDA_FORCE_PRELOAD_LIBRARIES", "1")
+            .env("CUDA_CACHE_PATH", h3_config_string("runtime.cuda_cache"))
+            .env("CUDA_MODULE_LOADING", h3_config_string("runtime.environment.CUDA_MODULE_LOADING"))
+            .env("LD_BIND_NOW", h3_config_string("runtime.environment.LD_BIND_NOW"))
+            .env("CUDA_FORCE_PRELOAD_LIBRARIES", h3_config_string("runtime.environment.CUDA_FORCE_PRELOAD_LIBRARIES"))
             .arg("decode")
             .arg(&thread_out_dir)
             .arg(steps.to_string())

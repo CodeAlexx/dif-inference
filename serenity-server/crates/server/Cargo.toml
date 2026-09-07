@@ -9,6 +9,7 @@ name = "serenity-server"
 path = "src/main.rs"
 
 [dependencies]
+difc-config = { path = "../difc-config" }
 serenity-wire.workspace = true
 serenity-ipc.workspace = true
 serenity-graph.workspace = true

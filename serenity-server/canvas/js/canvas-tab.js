@@ -3218,7 +3218,7 @@ var CanvasTab = (function () {
                 stage.batchDraw();
             }
             els.generateBtn.textContent = 'Run FlowEdit';
-            els.editRuntimeNote.textContent = 'Pure-Mojo FlowEdit. Krea2 Raw and Turbo have compiled 512×512 and 1024×1024 profiles; Ideogram4 is 1024×1024.';
+            els.editRuntimeNote.textContent = 'Compiled FlowEdit. Krea2 Raw and Turbo have compiled 512×512 and 1024×1024 profiles; Ideogram4 is 1024×1024.';
             els.editRuntimeNote.style.display = 'block';
         }
         else if (nativeModelEditing) {
@@ -3261,7 +3261,7 @@ var CanvasTab = (function () {
                 styleModeInitialized = true;
             }
             els.generateBtn.textContent = 'Apply reference style';
-            els.editRuntimeNote.textContent = 'The pure-Mojo vision captioner analyzes the lower-left reference, then ' +
+            els.editRuntimeNote.textContent = 'The compiled vision captioner analyzes the lower-left reference, then ' +
                 flowEditEngineLabel(genState.editEngine) +
                 ' FlowEdit applies that style to the upper-left source at 1024×1024. Entire image disables the localized change mask.';
             els.editRuntimeNote.style.display = 'block';
@@ -3296,7 +3296,7 @@ var CanvasTab = (function () {
         }
         else if (mode === 'dynaedit') {
             els.generateBtn.textContent = 'DynaEdit runner unavailable';
-            els.editRuntimeNote.textContent = 'Pure-Mojo DynaEdit exists in lingbot_flowedit.mojo, but no web request runner is connected yet.';
+            els.editRuntimeNote.textContent = 'DynaEdit has no compiled web request runner connected yet.';
             els.editRuntimeNote.style.display = 'block';
         }
         else if (i2vLtx23Mode) {
@@ -6374,7 +6374,7 @@ var CanvasTab = (function () {
         if (genState.editMode === 'style') {
             els.capabilityNote.textContent = 'Style mode routes through the selected 1024×1024 ' +
                 flowEditEngineLabel(genState.editEngine) +
-                ' FlowEdit worker after pure-Mojo visual analysis.';
+                ' FlowEdit worker after compiled visual analysis.';
             els.capabilityNote.style.display = 'block';
         }
         else if (genState.editMode === 'inpaint') {

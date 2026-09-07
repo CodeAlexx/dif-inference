@@ -2568,6 +2568,24 @@ pub fn artifact_name_inventory() -> BTreeMap<String, Vec<String>> {
             .or_default()
             .push(artifact.name);
     }
+    // Mojo's H3 inventory also includes encoder/VAEs nested in the checkpoint.
+    // Keep the same existence check, with deployment paths supplied by JSON.
+    let doc = difc_config::current().expect("validated deployment config");
+    if let Some(artifacts) = doc["minimax_h3"]["control"]["ui_artifacts"].as_array() {
+        for artifact in artifacts {
+            if let (Some(kind), Some(name), Some(path)) = (
+                artifact["type"].as_str(), artifact["name"].as_str(), artifact["path"].as_str(),
+            ) {
+                if std::path::Path::new(path).exists() {
+                    inventory.entry(kind.to_string()).or_default().push(name.to_string());
+                }
+            }
+        }
+    }
+    for names in inventory.values_mut() {
+        names.sort();
+        names.dedup();
+    }
     inventory
 }
 

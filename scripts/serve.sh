@@ -5,11 +5,10 @@
 #   scripts/serve.sh [--port N] [extra serenity-server args]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export SERENITY_REPO_ROOT="$ROOT"
-export SERENITY_MODEL_ROOT="${SERENITY_MODEL_ROOT:-$ROOT/models}"
-export SERENITY_OUT_DIR="${SERENITY_OUT_DIR:-$ROOT/output/run}"
-export DIFC_CONFIG="${DIFC_CONFIG:-$ROOT/config/difc.json}"
-PORT=7811
+source "$ROOT/scripts/config.sh"
+export SERENITY_MODEL_ROOT="$(config_get server.model_root)"
+export SERENITY_OUT_DIR="$(config_get server.output_dir)"
+PORT="$(config_get server.port)"
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,5 +17,5 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 mkdir -p "$SERENITY_OUT_DIR"
-exec "$ROOT/serenity-server/target/release/serenity-server" \
-  --worker "$ROOT/output/bin/serenity_worker_difc" --port "$PORT" --out-dir "$SERENITY_OUT_DIR" "${ARGS[@]}"
+exec "$(config_get server.binary)" \
+  --worker "$(config_get server.worker)" --port "$PORT" --out-dir "$SERENITY_OUT_DIR" "${ARGS[@]}"

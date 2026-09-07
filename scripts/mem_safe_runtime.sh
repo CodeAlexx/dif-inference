@@ -10,8 +10,8 @@
 #   H3-training admission gate (H3_ALLOW_USER_SLICE) and the clean-service env
 #   forwarding (CONDA/MODULAR/LD_LIBRARY_PATH + MODULAR_DEVICE_CONTEXT_*), so
 #   the mojodiffusion copy is canonical and is what is vendored here.
-# Everything below this comment block is byte-identical to the canonical
-# source after its shebang line — verified by diff at vendoring time.
+# Local changes add configuration forwarding and aggregate pressure monitoring.
+# This file is no longer byte-identical to the original vendored source.
 # ─────────────────────────────────────────────────────────────────────────────
 # Run a large GPU runtime in a rootless, hard-capped transient user service.
 #
@@ -24,6 +24,16 @@
 #
 # Usage: scripts/mem_safe_runtime.sh <program> [args...]
 set -euo pipefail
+
+guard_root="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+guard_policy="$guard_root/config/runtime.json"
+guard_script="$guard_root/scripts/runtime_guard.py"
+guard_lock="$(jq -er '.runtime.memory_guard.lock_file | select(type == "string" and length > 0)' "$guard_policy")"
+# This is a HEAVY-WORK lock, distinct from the device lock: CPU hashing,
+# builds and oracle runs can create the same session pressure as CUDA work.
+# Refuse overlap immediately; do not queue an unbudgeted job behind another.
+exec {guard_lock_fd}>"$guard_lock"
+flock -n "$guard_lock_fd" || { echo 'mem_safe_runtime: another guarded heavy job is active' >&2; exit 75; }
 
 MEM_MAX="${MEM_MAX:-24G}"
 MEM_HIGH="${MEM_HIGH:-infinity}"
@@ -98,6 +108,8 @@ if (( user_nonreclaimable_bytes + max_bytes > mem_total_bytes - reserve_bytes ))
   echo "mem_safe_runtime: user session + $MEM_MAX would violate $DESKTOP_RESERVE reserve" >&2
   exit 75
 fi
+python3 "$guard_script" admit --policy "$guard_policy" --parent "$user_service" \
+  --max-bytes "$max_bytes" --reserve-bytes "$reserve_bytes"
 
 prog="$1"
 shift
@@ -109,13 +121,12 @@ if [[ "$prog_path" != /* ]]; then
   prog_path="$(realpath "$prog_path")"
 fi
 
-# A long-lived H3 training process needs an explicit rootless opt-in. The
+# A long-lived H3 training process still needs an explicit rootless opt-in. The
 # 2026-08-16 guided run proved that a 24G child cap with the child left at
 # ManagedOOMMemoryPressure=auto was not enough: oomd selected the parent user
-# service at step 389. Opted-in H3 runs make their transient child an explicit
-# pressure-kill target and are expected to use a tighter cap/reserve than an
-# ordinary generation job. The caller must make that tradeoff explicit.
-managed_oom_pressure=auto
+# service at step 389. Every guarded child now has its own pressure-kill policy
+# in addition to the host/ancestor watcher. Training remains a separate opt-in.
+managed_oom_pressure=kill
 if [[ "$(basename "$prog_path")" == "train_minimax_h3" ]]; then
   if [[ "${H3_ALLOW_USER_SLICE:-0}" != 1 ]]; then
     echo "mem_safe_runtime: H3 training requires H3_ALLOW_USER_SLICE=1" >&2
@@ -130,13 +141,21 @@ unit_name="serenity-runtime-memory-$(date +%Y%m%d-%H%M%S)-$$"
 unit_cgroup="${user_service}/app.slice/${unit_name}.service"
 
 runtime_runner_pid=""
+runtime_guard_pid=""
 cleanup_runtime() {
-  if [[ -n "$runtime_runner_pid" ]] && kill -0 "$runtime_runner_pid" 2>/dev/null; then
+  if [[ -n "$runtime_runner_pid" ]]; then
     systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit_name" 2>/dev/null || true
+    kill "$runtime_runner_pid" 2>/dev/null || true
     wait "$runtime_runner_pid" 2>/dev/null || true
   fi
+  if [[ -n "$runtime_guard_pid" ]]; then
+    kill "$runtime_guard_pid" 2>/dev/null || true
+    wait "$runtime_guard_pid" 2>/dev/null || true
+  fi
 }
-trap cleanup_runtime INT TERM EXIT
+trap cleanup_runtime EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # A --user *service* starts with a clean environment (unlike mem_safe.sh's
 # env-inheriting scope). Forward the toolchain roots too, so `mojo build`
@@ -151,6 +170,16 @@ extra_env=()
 # boundary; without this allow-list the values are silently lost and MAX falls
 # back to its large default arena, leaving too little VRAM for desktop clients.
 for env_name in \
+  DIFC_CONFIG \
+  SERENITY_REPO_ROOT \
+  SERENITY_MODEL_ROOT \
+  H3_DENSE_INT8_KERNEL_PATH \
+  DIFC_LOCK_HELD \
+  DIF_FASTLOAD \
+  CUDA_CACHE_PATH \
+  CUDA_MODULE_LOADING \
+  LD_BIND_NOW \
+  CUDA_FORCE_PRELOAD_LIBRARIES \
   MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_SIZE \
   MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_SIZE_PERCENT \
   MODULAR_DEVICE_CONTEXT_MEMORY_MANAGER_CHUNK_PERCENT \
@@ -172,29 +201,32 @@ systemd-run --user \
   --property="MemorySwapMax=$SWAP_MAX" \
   --property=OOMPolicy=kill \
   --property="ManagedOOMMemoryPressure=$managed_oom_pressure" \
+  --property="ManagedOOMMemoryPressureLimit=$(jq -er '.runtime.memory_guard.some_pressure_percent' "$guard_policy")%" \
+  --property="RuntimeMaxSec=$(jq -er '.runtime.memory_guard.maximum_runtime_seconds' "$guard_policy")" \
   --setenv="PATH=$PATH" \
   "${extra_env[@]}" \
   -- "$prog_path" "$@" &
 runtime_runner_pid="$!"
 
-observed_peak=0
-last_events="unavailable"
-while kill -0 "$runtime_runner_pid" 2>/dev/null; do
-  if [[ -r "$unit_cgroup/memory.peak" ]]; then
-    sample_peak="$(<"$unit_cgroup/memory.peak")"
-    if (( sample_peak > observed_peak )); then
-      observed_peak="$sample_peak"
-    fi
-    last_events="$(tr '\n' ' ' < "$unit_cgroup/memory.events")"
-  fi
-  sleep 0.2
-done
-
 set +e
+python3 "$guard_script" watch --policy "$guard_policy" --parent "$user_service" \
+  --max-bytes "$max_bytes" --reserve-bytes "$reserve_bytes" \
+  --unit "$unit_name" --child "$unit_cgroup" --runner-pid "$runtime_runner_pid" --owner-pid "$$" &
+runtime_guard_pid="$!"
+# Bash wait is interruptible by traps; a foreground Python command would defer
+# TERM handling until that command finished. The watcher independently detects
+# wrapper death (including untrappable SIGKILL).
+wait "$runtime_guard_pid"
+guard_rc="$?"
+runtime_guard_pid=""
+if [[ "$guard_rc" != 0 ]]; then
+  systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit_name" 2>/dev/null || true
+fi
 wait "$runtime_runner_pid"
 runner_rc="$?"
 set -e
 runtime_runner_pid=""
 trap - INT TERM EXIT
-echo "[mem_safe_runtime] unit=$unit_name peak_bytes=$observed_peak events=$last_events" >&2
+echo "[mem_safe_runtime] unit=$unit_name guard_rc=$guard_rc child_rc=$runner_rc" >&2
+if [[ "$guard_rc" != 0 ]]; then exit "$guard_rc"; fi
 exit "$runner_rc"

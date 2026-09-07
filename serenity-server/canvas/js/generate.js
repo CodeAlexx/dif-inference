@@ -73,6 +73,10 @@ var GenerateTab = (function () {
         videoQuant: 'fp8',
         h3Quant: 'int8-fast',
         h3Mode: 't2va',
+        h3References: [],
+        h3ReferencesUploading: false,
+        h3Controls: [],
+        h3ControlsUploading: false,
         h3AttentionBackend: 'ck-int8',
         h3StepCache: 'exact',
         cameraMotion: 'none',
@@ -787,13 +791,16 @@ var GenerateTab = (function () {
             '<input type="number" id="gen-custom-height" class="gen-number-input" value="1024" disabled></div>' +
             '<div id="gen-aspect-preview" class="gen-aspect-preview"><span>1024×1024</span></div></div>';
         var sourceBody =
+            '<div id="gen-single-source">' +
             '<div id="gen-init-drop" class="gen-init-drop">' +
             '<input id="gen-init-image-input" type="file" accept="image/*" aria-label="Choose source image">' +
             '<div id="gen-init-empty"><i data-lucide="image-plus"></i><span>Choose or drop a source image</span></div>' +
             '<img id="gen-init-preview" style="display:none" alt="Selected source image"></div>' +
             '<div id="gen-init-name" class="gen-init-name">No source image</div>' +
             '<button id="gen-init-clear" type="button" class="gen-small-btn destructive" disabled>Clear source</button>' +
-            '<div class="gen-capability-note">The selected source is used for admitted img2img and I2V routes. Source Assets can select the same field without uploading again.</div>';
+            '<div class="gen-capability-note">The selected source is used for admitted img2img and I2V routes. Source Assets can select the same field without uploading again.</div></div>' +
+            '<div id="gen-h3-references" style="display:none"></div>' +
+            '<div id="gen-h3-controls" style="display:none"></div>';
         var samplingBody =
             '<div class="gen-param-row" data-param-search="sampler algorithm"><label class="gen-label" for="gen-sampler">Sampler</label><select id="gen-sampler" class="gen-select"></select></div>' +
             '<div class="gen-param-row" data-param-search="scheduler noise schedule"><label class="gen-label" for="gen-scheduler">Scheduler</label><select id="gen-scheduler" class="gen-select"></select></div>' +
@@ -2635,6 +2642,118 @@ var GenerateTab = (function () {
         if (clear)
             clear.disabled = true;
     }
+    // Use H3 Studio's reference editor and reference objects on Generate too.
+    function renderH3References() {
+        var panel = document.getElementById('gen-h3-references');
+        var single = document.getElementById('gen-single-source');
+        if (!panel || !single) return;
+        var active = state.arch === 'minimax_h3' && state.h3Mode === 'ref2va';
+        single.style.display = active ? 'none' : '';
+        panel.style.display = active ? '' : 'none';
+        if (!active) return;
+        if (state.initImagePath) {
+            if (!state.h3References.some(function (row) { return row.path === state.initImagePath; })) {
+                var source = H3ProjectContracts.createReference('image', state.initImagePath);
+                source.note = state.initImageName;
+                state.h3References.push(source);
+            }
+            clearInitImage();
+        }
+        var runner = activeMinimaxH3Runner();
+        var policy = runner && runner.reference_policy;
+        if (!policy || !Array.isArray(policy.kinds)) {
+            panel.textContent = 'Loading reference controls…';
+            return;
+        }
+        panel.innerHTML = H3StudioTab.referenceInspectorHtml({
+            references: state.h3References, locked: state.h3ReferencesUploading
+        }, policy) + '<input id="gen-h3-reference-files" type="file" multiple hidden>' +
+            '<div class="h3s-help">' + (state.h3ReferencesUploading ? 'Uploading references…' : 'Reference labels follow the list order. Describe each label in the prompt.') + '</div>';
+        var input = panel.querySelector('input[type="file"]');
+        input.accept = policy.kinds.map(function (kind) { return kind + '/*'; }).join(',');
+        panel.querySelector('[data-h3-action="upload-references"]').addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () { uploadH3References(Array.from(this.files || []), policy); });
+        panel.querySelectorAll('.h3s-ref-kind').forEach(function (node, index) {
+            node.textContent = H3ProjectContracts.referenceSourceLabel(state.h3References, index);
+        });
+        panel.querySelectorAll('[data-ref-field]').forEach(function (node) {
+            var index = Number(node.dataset.refIndex), field = node.dataset.refField;
+            node.setAttribute('aria-label', 'Reference ' + (index + 1) + ' ' + field.replace(/_/g, ' '));
+            node.addEventListener(node.tagName === 'INPUT' ? 'input' : 'change', function () {
+                if (state.h3ReferencesUploading) return;
+                state.h3References[index][field] = field === 'duration_seconds' ? Number(node.value) : node.value;
+            });
+        });
+        panel.querySelectorAll('[data-ref-move]').forEach(function (node) {
+            var index = Number(node.dataset.refIndex), delta = Number(node.dataset.refMove);
+            node.setAttribute('aria-label', 'Move reference ' + (index + 1) + (delta < 0 ? ' up' : ' down'));
+            node.disabled = state.h3ReferencesUploading || index + delta < 0 || index + delta >= state.h3References.length;
+            node.addEventListener('click', function () {
+                var row = state.h3References.splice(index, 1)[0];
+                state.h3References.splice(index + delta, 0, row);
+                renderH3References();
+            });
+        });
+        panel.querySelectorAll('[data-ref-remove]').forEach(function (node) {
+            var index = Number(node.dataset.refRemove);
+            node.setAttribute('aria-label', 'Remove reference ' + (index + 1));
+            node.disabled = state.h3ReferencesUploading;
+            node.addEventListener('click', function () { state.h3References.splice(index, 1); renderH3References(); });
+        });
+    }
+    function renderH3Controls() {
+        var panel = document.getElementById('gen-h3-controls');
+        if (!panel) return;
+        var active = state.arch === 'minimax_h3' && (state.h3Mode !== 'ref2va' || state.h3Controls.length);
+        panel.style.display = active ? '' : 'none';
+        if (!active) return;
+        var features = (activeMinimaxH3Runner() || {}).features || {};
+        var controls = state.h3Controls;
+        var issue = H3ProjectContracts.featureIssue({controls: controls, lora: [], step_cache: state.h3StepCache,
+            first_frame: state.initImagePath, references: state.h3Mode === 'ref2va' ? state.h3References : []}, features);
+        panel.innerHTML = (issue ? '<div class="h3s-warning">' + escapeHtml(issue) + '</div>' : '') +
+            H3StudioTab.controlInspectorHtml(controls, features.controlnet, state.h3ControlsUploading);
+        H3StudioTab.bindControlEditor(panel, controls, features.controlnet, {
+            canMutate: function () { return state.h3Controls === controls; },
+            isUploading: function () { return state.h3ControlsUploading; },
+            uploading: function (value) { state.h3ControlsUploading = value; },
+            change: function () {}, render: renderH3Controls, error: showError
+        });
+    }
+    function uploadH3References(files, policy) {
+        if (!files.length || state.h3ReferencesUploading) return;
+        var counts = {};
+        state.h3References.forEach(function (row) { counts[row.kind] = (counts[row.kind] || 0) + 1; });
+        if (state.h3References.length + files.length > policy.max_total) {
+            showError('H3 accepts at most ' + policy.max_total + ' total references.');
+            return;
+        }
+        for (var i = 0; i < files.length; i++) {
+            var kind = (files[i].type || '').split('/')[0];
+            if (policy.kinds.indexOf(kind) < 0) {
+                showError('This Ref2VA route accepts ' + policy.kinds.join(' and ') + ' references.');
+                return;
+            }
+            counts[kind] = (counts[kind] || 0) + 1;
+            if (counts[kind] > policy['max_' + kind + 's']) {
+                showError('H3 accepts at most ' + policy['max_' + kind + 's'] + ' ' + kind + ' references.');
+                return;
+            }
+        }
+        state.h3ReferencesUploading = true;
+        renderH3References();
+        var chain = Promise.resolve();
+        files.forEach(function (file) {
+            chain = chain.then(function () { return SerenityAPI.uploadMediaDetails(file).then(function (data) {
+                var ref = H3ProjectContracts.createReference(file.type.split('/')[0], data.path || data.name || '');
+                ref.note = file.name;
+                ref.url = data.url || '';
+                state.h3References.push(ref);
+            }); });
+        });
+        chain.catch(function (error) { showError('Reference upload failed: ' + error.message); })
+            .finally(function () { state.h3ReferencesUploading = false; renderH3References(); });
+    }
     function bindGenerateControls() {
         ['gen-core', 'gen-variation', 'gen-sampling', 'gen-video',
             'gen-source', 'gen-video-conditioning', 'gen-lora', 'gen-advanced-runtime',
@@ -2673,6 +2792,8 @@ var GenerateTab = (function () {
                 state.variationSeed = 0;
                 state.variationStrength = 0;
                 clearInitImage();
+                if (state.arch === 'minimax_h3' && state.h3Mode === 'ref2va') state.h3References = [];
+                if (state.arch === 'minimax_h3' && !state.h3ControlsUploading) state.h3Controls = [];
                 updateUIForArch(state.arch);
                 var variationSeed = document.getElementById('gen-variation-seed');
                 var variationStrength = document.getElementById('gen-variation-strength');
@@ -3281,6 +3402,8 @@ var GenerateTab = (function () {
     // ── Arch-aware UI ──
     function updateUIForArch(arch) {
         updateGenerateUIForArch(arch);
+        renderH3References();
+        renderH3Controls();
         return;
     }
     function applyVideoGuidanceMode(preserveSteps) {
@@ -3472,9 +3595,23 @@ var GenerateTab = (function () {
         var candidates = state.videoStatus && state.videoStatus.candidate_runners;
         if (!Array.isArray(candidates))
             return null;
-        return candidates.find(function (entry) {
+        var runner = candidates.find(function (entry) {
             return entry && entry.model === 'minimax_h3_t2va';
         }) || null;
+        if (!runner || state.h3Mode !== 'ref2va') return runner;
+        var task = (runner.conditioned_modes || []).find(function (entry) { return entry.id === 'ref2va'; });
+        if (!task) return runner;
+        return Object.assign({}, runner, {
+            available: task.available,
+            reference_policy: task.reference_policy,
+            quant_modes: (runner.quant_modes || []).map(function (mode) {
+                return Object.assign({}, mode, {
+                    available: !!(task.available_modes && task.available_modes[mode.id]),
+                    label: task.int8_route === 'w8a8' && mode.id !== 'bf16'
+                        ? 'W8A8 INT8 · existing Ref2VA weights' : mode.label
+                });
+            })
+        });
     }
 
     function normalizeMinimaxH3AttentionBackend(quant, backend) {
@@ -3535,6 +3672,8 @@ var GenerateTab = (function () {
         var constraints = runner && runner.geometry_constraints || {};
         var trainedMax = Number(constraints.trained_seconds_max) || 15;
         var absoluteMax = Number(constraints.seconds_max) || trainedMax;
+        if (constraints.shape_policy === 'sealed_native_profile')
+            return absoluteMax;
         var tokenMax = Number(constraints.long_context_max_sequence_tokens) || 0;
         if (absoluteMax <= trainedMax || tokenMax <= 0)
             return trainedMax;
@@ -3696,8 +3835,18 @@ var GenerateTab = (function () {
             }).join('');
             syncMinimaxH3AttentionControl();
         }
-        if (els.h3StepCache)
+        if (els.h3StepCache) {
+            var cacheModes = runner && Array.isArray(runner.step_cache_modes)
+                ? runner.step_cache_modes : [];
+            els.h3StepCache.innerHTML = cacheModes.map(function (mode) {
+                return '<option value="' + mode.id + '"' +
+                    (mode.available === true ? '' : ' disabled') + '>' + mode.label + '</option>';
+            }).join('') || '<option value="exact">Exact</option>';
+            if (!Array.from(els.h3StepCache.options).some(function (option) {
+                return option.value === state.h3StepCache && !option.disabled;
+            })) state.h3StepCache = 'exact';
             els.h3StepCache.value = state.h3StepCache;
+        }
         if (els.audioPolicy) {
             els.audioPolicy.innerHTML = '<option value="generate">Generate synchronized audio</option>';
             els.audioPolicy.value = 'generate';
@@ -3779,8 +3928,8 @@ var GenerateTab = (function () {
         if (profileNote) {
             profileNote.textContent = runnerReady
                 ? (state.h3Mode === 'ref2va'
-                    ? 'MiniMax-H3 Ref2VA uses the installed Ref2VA checkpoint family. Select a source image below as its visual reference; richer ordered image, video, and audio references remain available in H3 Studio.'
-                    : 'MiniMax-H3 Base uses the installed FL2VA checkpoint family. With no source it runs T2VA; one selected source image runs I2VA. Width and height remain adjustable inside the published H3 envelope.')
+                    ? 'Add ordered references in Source Image. Use <Picture N> and <Audio N> labels in the prompt. Image and audio references are connected; video-reference ingestion is not connected yet.'
+                    : 'MiniMax-H3 Base uses the compiler FL2VA path: no source selects T2VA; a source selects I2VA. Keyframes must match the configured canvas. Other sizes and features are admitted separately.')
                 : 'MiniMax-H3 controls remain visible, but a required model file, runner, or GPU runtime library is missing.';
         }
         var advancedNote = document.getElementById('gen-video-advanced-note');
@@ -4544,7 +4693,7 @@ var GenerateTab = (function () {
             var h3Request = {
                 schema: 'serenity.genparams.v1',
                 model: 'minimax_h3',
-                runner: 'minimax_h3_mojo_request',
+                runner: 'minimax_h3_compiler_request',
                 task: h3Task,
                 prompt: finalPrompt.trim(),
                 width: state.width,
@@ -4562,15 +4711,22 @@ var GenerateTab = (function () {
                 attention_backend: normalizeMinimaxH3AttentionBackend(
                     state.videoQuant, state.h3AttentionBackend),
                 step_cache: state.h3StepCache === 'high' ? 'high' : 'exact',
+                lora: state.loras.filter(function (row) { return row.enabled !== false; }).map(function (row) {
+                    return {name: row.name, weight: Number(row.strength)};
+                }),
                 include_audio: true
             };
-            // Generate's source-image picker is shared by the image/video
-            // surfaces. The Base/FL2VA card interprets one selected image as
-            // I2VA; the Ref2VA card sends the same exact server path as its
-            // single ordered visual reference. No source remains explicit
-            // T2VA for Base and fails Ref2VA admission before GPU work.
-            if (h3SourceImage)
+            if (h3Task === 'ref2va' && state.h3References.length)
+                h3Request.references = state.h3References.map(H3ProjectContracts.copy);
+            else if (h3SourceImage)
                 h3Request.source_image = h3SourceImage;
+            if (state.h3Controls.length) {
+                if (h3Task !== 't2va') throw new Error('ControlNet supports H3 T2VA only; remove source images/references or remove controls.');
+                var controlIssue = H3ProjectContracts.featureIssue({ controls: state.h3Controls, lora: [], step_cache: h3Request.step_cache },
+                    (activeMinimaxH3Runner() || {}).features || {});
+                if (controlIssue) throw new Error(controlIssue);
+                h3Request.controls = state.h3Controls.map(H3ProjectContracts.controlRequest);
+            }
             return h3Request;
         }
         if (state.arch === 'wan') {
@@ -4745,6 +4901,14 @@ var GenerateTab = (function () {
         setTimeout(poll, 250);
     }
     function generateVideo() {
+        if (state.arch === 'minimax_h3' && state.h3ControlsUploading) {
+            showError('Wait for the control media uploads to finish.');
+            return;
+        }
+        if (state.arch === 'minimax_h3' && state.h3Mode === 'ref2va' && state.h3ReferencesUploading) {
+            showError('Wait for the reference uploads to finish.');
+            return;
+        }
         if (ModelUtils.archForModel(state.model) === 'ltxv' &&
             !exactLtx2RequestProfile()) {
             var note = document.getElementById('gen-video-profile-note');
@@ -4756,10 +4920,12 @@ var GenerateTab = (function () {
         var seed = state.seed === -1
             ? Math.floor(Math.random() * 4294967296)
             : state.seed;
+        var request;
+        try { request = buildVideoRequest(seed); }
+        catch (error) { showError(error.message); return; }
         state.lastSeed = seed;
         beginCurrentBatch();
         state.pendingBatch = 1;
-        var request = buildVideoRequest(seed);
         var reusable = getParams();
         reusable.seed = seed;
         reusable.arch = ModelUtils.archForModel(reusable.model);
@@ -6576,6 +6742,16 @@ var GenerateTab = (function () {
             showError('Only image assets can be used as an I2V/img2img source here');
             return;
         }
+        if (state.arch === 'minimax_h3' && state.h3Mode === 'ref2va') {
+            if (!state.h3References.some(function (row) { return row.path === asset.path; })) {
+                var reference = H3ProjectContracts.createReference('image', asset.path);
+                reference.note = asset.name || '';
+                reference.url = asset.url || '';
+                state.h3References.push(reference);
+            }
+            renderH3References();
+            return;
+        }
         state.initImagePath = String(asset.path || '');
         state.initImageName = String(asset.name || state.initImagePath);
         state.initImageWidth = Number(asset.width) || 0;
@@ -6911,6 +7087,8 @@ var GenerateTab = (function () {
             ltx2CameraMotion: state.cameraMotion,
             initImagePath: state.initImagePath,
             initImageName: state.initImageName,
+            h3References: state.h3References.map(function (row) { return Object.assign({}, row); }),
+            h3Controls: state.h3Controls.map(H3ProjectContracts.copy),
             noSeedIncrement: state.noSeedIncrement,
             continueAfterErrors: state.continueAfterErrors,
             personalNote: state.personalNote,
@@ -6946,13 +7124,17 @@ var GenerateTab = (function () {
             });
         }
         params = normalized;
+        if (Array.isArray(params.h3References) || Array.isArray(params.references))
+            state.h3References = (params.h3References || params.references).map(function (row) { return Object.assign({}, row); });
+        if (Array.isArray(params.h3Controls) || Array.isArray(params.controls))
+            state.h3Controls = (params.h3Controls || params.controls).map(H3ProjectContracts.copy);
         if (typeof params.model === 'string' && params.model) {
             var requestedModel = params.model === 'ltx2'
                 ? String(params.videoCheckpoint || params.checkpoint ||
                     (((params.videoQuant || params.quant) === 'bf16')
                         ? 'ltx-2.3-22b-distilled-fp8-dequant-bf16'
                         : 'ltx-2.3-22b-distilled'))
-                : (params.model === 'minimax_h3' ? 'MiniMax-H3-Mojo' : params.model);
+                : (params.model === 'minimax_h3' ? 'MiniMax-H3-Compiler' : params.model);
             state.model = requestedModel;
             if (els.model)
                 els.model.value = requestedModel;

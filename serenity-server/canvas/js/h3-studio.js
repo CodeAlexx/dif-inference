@@ -21,6 +21,8 @@ var H3StudioTab = (function () {
         requestJson: '',
         directorRunning: false,
         readiness: null,
+        loraNames: [],
+        controlsUploading: false,
         status: 'Ready · opening Studio never starts GPU work',
         statusTone: '',
         videoPollToken: 0,
@@ -270,7 +272,7 @@ var H3StudioTab = (function () {
                 (state.characterPanels === 4 ? '<div class="h3s-warning">Four-panel is metadata only: the upstream geometry conflicts and 73 frames is below Serenity’s five-second render minimum.</div>' : '') : '') +
             '<label class="h3s-field"><span>Director input</span><textarea class="h3s-textarea is-script" data-project-field="director_brief" placeholder="Story outline, script, edit request, shot diagnosis, or character extraction instructions…">' + escapeHtml(state.project.director_brief) + '</textarea></label>' +
             '<div class="h3s-button-row"><button class="h3s-btn is-primary" data-h3-action="run-director"' + disabled(state.directorRunning) + '>' + (state.directorRunning ? 'Director pass running…' : 'Run Qwen Director pass') + '</button><button class="h3s-btn" data-h3-action="apply-director"' + disabled(!directorResultJson()) + '>Apply result to project</button><button class="h3s-btn" data-h3-action="prepare-director">Prepare Qwen Director pass</button><button class="h3s-btn" data-h3-action="copy-request"' + disabled(!state.requestJson) + '>Copy request</button><button class="h3s-btn" data-h3-action="download-request"' + disabled(!state.requestJson) + '>Download request</button></div>' +
-            '<div class="h3s-help" style="margin-top:7px">Plan envelope: ' + minShots + '–' + maxShots + ' shots · ' + state.project.takes_per_shot + ' take(s) each. Run launches the pure-Mojo Qwen3-VL H3 captioner on the GPU (about 1–3 minutes, no H3 render). Prepare only is CPU-only.</div>' +
+            '<div class="h3s-help" style="margin-top:7px">Plan envelope: ' + minShots + '–' + maxShots + ' shots · ' + state.project.takes_per_shot + ' take(s) each. Run launches the compiled Qwen3-VL H3 captioner on the GPU (about 1–3 minutes, no H3 render). Prepare only is CPU-only.</div>' +
             directorResultHtml() +
             (state.requestJson ? '<details class="h3s-request"><summary>Prepared serenity.h3.caption.v2 request</summary><pre>' + escapeHtml(state.requestJson) + '</pre></details>' : '');
     }
@@ -289,6 +291,11 @@ var H3StudioTab = (function () {
     function shotInspectorHtml() {
         var shot = selectedShot();
         var lock = shot.locked;
+        var runtime = h3Runner();
+        var geometry = runtime && runtime.geometry_constraints || {};
+        var resolutions = Array.isArray(geometry.resolutions) ? geometry.resolutions : [];
+        var cacheModes = runtime && Array.isArray(runtime.step_cache_modes) ? runtime.step_cache_modes : [];
+        var quantModes = runtime && Array.isArray(runtime.quant_modes) ? runtime.quant_modes : [];
         var attentionBackends = h3AttentionBackends();
         var effectiveAttention = resolvedH3Attention(shot);
         var attentionOptions = H3AttentionContracts.definitions(attentionBackends)
@@ -305,7 +312,7 @@ var H3StudioTab = (function () {
         return '<label class="h3s-check"><input type="checkbox" data-shot-field="locked"' + checked(lock) + '><span>Lock approved shot. Protect prompt, references, sound, order and takes.</span></label>' +
             '<label class="h3s-field" style="margin-top:10px"><span>Shot name</span><input class="h3s-input" data-shot-field="title" value="' + attr(shot.title) + '"' + disabled(lock) + '></label>' +
             '<div class="h3s-grid-2"><label class="h3s-field"><span>Duration · 5–15s</span><input class="h3s-input" type="number" min="5" max="15" step="0.25" data-shot-field="duration_seconds" value="' + attr(shot.duration_seconds) + '"' + disabled(lock) + '></label>' +
-            '<label class="h3s-field"><span>Resolution</span><select id="h3s-resolution" class="h3s-select"' + disabled(lock) + '>' + C.RESOLUTIONS.map(function (row) {
+            '<label class="h3s-field"><span>Resolution</span><select id="h3s-resolution" class="h3s-select"' + disabled(lock) + '>' + resolutions.map(function (row) {
                 return '<option value="' + row.width + 'x' + row.height + '"' + selected(shot.width + 'x' + shot.height, row.width + 'x' + row.height) + '>' + row.label + '</option>';
             }).join('') + '</select></label></div>' +
             '<div class="h3s-grid-2"><label class="h3s-field"><span>Steps</span><input class="h3s-input" type="number" min="2" max="50" data-shot-field="steps" value="' + shot.steps + '"' + disabled(lock) + '></label><label class="h3s-field"><span>Seed</span><input class="h3s-input" type="number" min="0" max="4294967295" data-shot-field="seed" value="' + shot.seed + '"' + disabled(lock) + '></label></div>' +
@@ -313,9 +320,13 @@ var H3StudioTab = (function () {
             '<label class="h3s-field"><span>Ending frame</span><div class="h3s-button-row"><input class="h3s-input" data-shot-field="last_frame" value="' + attr(shot.last_frame) + '" placeholder="Server-uploaded path"' + disabled(lock) + '><button class="h3s-btn" data-h3-action="upload-last"' + disabled(lock) + '>Choose</button></div></label>' +
             '<label class="h3s-field"><span>Continue from · video-XXXX</span><input class="h3s-input" data-shot-field="continue_from" value="' + attr(shot.continue_from) + '"' + disabled(lock) + '></label>' +
             '<label class="h3s-field"><span>Motion seam</span><select class="h3s-select" data-shot-field="motion_context_frames"' + disabled(lock) + '><option value="5"' + selected(shot.motion_context_frames, 5) + '>Short · 5 frames</option><option value="22"' + selected(shot.motion_context_frames, 22) + '>Balanced · 22 frames</option><option value="39"' + selected(shot.motion_context_frames, 39) + '>Long · 39 frames</option></select></label>' +
-            '<div class="h3s-grid-2"><label class="h3s-field"><span>Precision</span><select class="h3s-select" data-shot-field="quant"' + disabled(lock) + '><option value="int8-fast"' + selected(shot.quant, 'int8-fast') + '>INT8 Fast</option><option value="int8"' + selected(shot.quant, 'int8') + '>INT8 Quality</option><option value="bf16"' + selected(shot.quant, 'bf16') + '>BF16</option></select></label>' +
+            '<div class="h3s-grid-2"><label class="h3s-field"><span>Precision</span><select class="h3s-select" data-shot-field="quant"' + disabled(lock) + '>' + quantModes.map(function (mode) {
+                return '<option value="' + attr(mode.id) + '"' + selected(shot.quant, mode.id) + disabled(!mode.available) + '>' + escapeHtml(mode.label) + '</option>';
+            }).join('') + '</select></label>' +
             '<label class="h3s-field"><span>Attention</span><select class="h3s-select" data-shot-field="attention_backend"' + disabled(lock) + '>' + attentionOptions + '</select></label></div>' +
-            '<label class="h3s-field"><span>Denoise acceleration</span><select class="h3s-select" data-shot-field="step_cache"' + disabled(lock) + '><option value="exact"' + selected(shot.step_cache, 'exact') + '>Exact · quality default</option><option value="high"' + selected(shot.step_cache, 'high') + '>High · approximate</option></select></label>';
+            '<label class="h3s-field"><span>Denoise acceleration</span><select class="h3s-select" data-shot-field="step_cache"' + disabled(lock) + '>' + cacheModes.map(function (mode) {
+                return '<option value="' + attr(mode.id) + '"' + selected(shot.step_cache, mode.id) + disabled(!mode.available) + '>' + escapeHtml(mode.label) + '</option>';
+            }).join('') + '</select></label>';
     }
 
     function soundInspectorHtml() {
@@ -325,15 +336,149 @@ var H3StudioTab = (function () {
             '<label class="h3s-field"><span>Audience-only score · instrumentation · tempo</span><textarea class="h3s-textarea" data-shot-field="music"' + disabled(lock) + '>' + escapeHtml(shot.music) + '</textarea></label>';
     }
 
-    function referenceInspectorHtml() {
-        var shot = selectedShot(), lock = shot.locked;
-        return '<div class="h3s-panel-head"><div><div class="h3s-kicker">Ordered reference pack</div><div class="h3s-help" style="margin-top:4px">9 images · 3 videos · 3 audio · 12 total</div></div><button class="h3s-btn is-primary" data-h3-action="upload-references"' + disabled(lock) + '>Add files</button></div>' +
+    // The Mojo control deck's media/fit/Canny/inpaint fields, shared by Studio
+    // and Generate. Execution remains the existing flat /v1/video contract.
+    function controlInspectorHtml(controls, policy, lock) {
+        policy = policy || {};
+        var limit = Math.min(4, Number(policy.max_count) || 4);
+        var defaults = C.createControl('', policy);
+        function attrs(index, key) { return ' data-control-index="' + index + '" data-control-field="' + key + '"'; }
+        function field(index, key, value, label, bounds) {
+            return '<label class="h3s-field"><span>' + label + '</span><input class="h3s-input" type="' + (bounds ? 'number' : 'text') + '"' + (bounds || '') + attrs(index, key) + ' value="' + attr(value) + '"' + disabled(lock) + '></label>';
+        }
+        function select(index, key, value, label, choices, labels) {
+            return '<label class="h3s-field"><span>' + label + '</span><select class="h3s-select"' + attrs(index, key) + disabled(lock) + '>' + choices.map(function (choice) {
+                return '<option value="' + attr(choice) + '"' + selected(value, choice) + '>' + escapeHtml(labels[choice] || choice) + '</option>';
+            }).join('') + '</select></label>';
+        }
+        function media(row, index, key, label) {
+            var details = row._media && row._media[key] || {};
+            var src = details.path === row[key] ? details.thumbnail_url || details.url : '';
+            if (!src && row[key]) src = SerenityAPI.viewUrl(row[key]);
+            var video = !details.thumbnail_url && (details.kind === 'video' || /\.(mp4|webm|mov|mkv)(?:$|\?)/i.test(row[key] || ''));
+            return '<div class="h3s-control-media">' + (src ? (video
+                ? '<video class="h3s-control-preview" controls preload="metadata" src="' + attr(src) + '"></video>'
+                : '<img class="h3s-control-preview" src="' + attr(src) + '" alt="' + label + '">') : '') +
+                field(index, key, row[key] || '', label + ' · server path', '') +
+                '<label class="h3s-btn h3s-control-upload">Choose image or video<input type="file" accept="image/*,video/*" data-control-index="' + index + '" data-control-upload-field="' + key + '"' + disabled(lock) + '></label></div>';
+        }
+        return '<div class="h3s-section-head" style="margin-top:16px"><span class="h3s-kicker">Ordered ControlNet guides</span><button class="h3s-btn" data-control-action="upload"' + disabled(lock || controls.length >= limit) + '>Upload media</button><button class="h3s-btn" data-control-action="add"' + disabled(lock || controls.length >= limit) + '>Path</button></div>' +
+            '<input type="file" accept="image/*,video/*" multiple data-control-files="" hidden>' +
+            '<div class="h3s-help">' + (policy.available ? 'Up to ' + limit + ' guides.' : 'Unavailable in this native deployment.') + ' T2VA + exact steps only. Selection order is control order. Images and short clips hold their final frame; long clips trim at 24 FPS. Prepared accepts depth, pose or edge maps; Canny extracts edges.</div>' +
+            controls.map(function (saved, index) {
+                var row = Object.assign({}, defaults, saved || {});
+                return '<div class="h3s-ref h3s-control"><div class="h3s-ref-top"><strong>Guide ' + (index + 1) + '</strong><span class="h3s-ref-actions">' + [-1, 1, 0].map(function (delta) {
+                    return '<button class="h3s-btn h3s-icon-btn" data-control-action="' + (delta ? 'move' : 'remove') + '" data-control-index="' + index + '" data-control-delta="' + delta + '" aria-label="' + (delta ? 'Move guide ' + (index + 1) + (delta < 0 ? ' up' : ' down') : 'Remove guide ' + (index + 1)) + '"' + disabled(lock || (delta && (index + delta < 0 || index + delta >= controls.length))) + '>' + (delta < 0 ? '↑' : delta > 0 ? '↓' : '×') + '</button>';
+                }).join('') + '</span></div>' + media(row, index, 'path', 'Guide') +
+                    '<div class="h3s-grid-2">' + select(index, 'preprocessor', row.preprocessor, 'Input handling', policy.preprocessors || ['prepared', 'canny'], {prepared:'Prepared map', canny:'Native Canny'}) +
+                    select(index, 'resize_mode', row.resize_mode, 'Canvas fit', policy.resize_modes || ['crop', 'pad', 'stretch'], {crop:'Center crop', pad:'Fit + pad', stretch:'Stretch'}) + '</div>' +
+                    (row.preprocessor === 'canny' ? '<div class="h3s-grid-2">' + field(index, 'canny_low', row.canny_low, 'Canny low', ' min="0" max="254" step="1"') + field(index, 'canny_high', row.canny_high, 'Canny high', ' min="1" max="255" step="1"') + '</div>' : '') +
+                    field(index, 'strength', row.strength, 'Strength', ' step="0.05"') + '<div class="h3s-grid-2">' + field(index, 'start', row.start, 'Start · data-ward timestep', ' min="0" max="1" step="0.05"') + field(index, 'end', row.end, 'End · data-ward timestep', ' min="0" max="1" step="0.05"') + '</div>' +
+                    '<details class="h3s-control-inpaint"' + (row.source_path || row.mask_path ? ' open' : '') + '><summary>Optional inpaint</summary><div class="h3s-help">White mask repaints; black preserves the source. Supply both source and mask, aligned using the same canvas fit.</div>' + media(row, index, 'source_path', 'Source') + media(row, index, 'mask_path', 'Mask') +
+                    '<label class="h3s-check"><input type="checkbox"' + attrs(index, 'invert_mask') + checked(row.invert_mask) + disabled(lock) + '> Invert mask</label></details></div>';
+            }).join('');
+    }
+
+    function bindControlEditor(panel, controls, policy, hooks) {
+        var limit = Math.min(4, Number(policy && policy.max_count) || 4);
+        function mutable() { return !hooks.isUploading() && hooks.canMutate(); }
+        function changed() { hooks.change(); hooks.render(); }
+        function upload(files, row, field) {
+            if (!files.length || !mutable()) return;
+            if (!files.every(function (file) { return /^(image|video)\//.test(file.type || ''); })) { hooks.error('Control media must be images or videos.'); return; }
+            if (!row && controls.length + files.length > limit) { hooks.error('H3 accepts at most ' + limit + ' control guides.'); return; }
+            hooks.uploading(true); hooks.render();
+            var chain = Promise.resolve();
+            files.forEach(function (file) { chain = chain.then(function () {
+                if (!hooks.canMutate()) throw new Error('Control inputs changed or became locked during upload.');
+                return SerenityAPI.uploadMediaDetails(file).then(function (data) {
+                    if (!hooks.canMutate() || (row && controls.indexOf(row) < 0)) throw new Error('Original control is no longer editable.');
+                    if (!data.path) throw new Error('Upload did not return a server path.');
+                    var target = row || C.createControl('', policy);
+                    C.setControlMedia(target, field || 'path', data, file);
+                    if (!row) controls.push(target);
+                    hooks.change();
+                });
+            }); });
+            chain.catch(function (error) { hooks.error('Control upload failed: ' + error.message); })
+                .finally(function () { hooks.uploading(false); hooks.render(); });
+        }
+        panel.querySelectorAll('[data-control-field]').forEach(function (node) {
+            function update() {
+                if (!mutable()) return;
+                var row = controls[Number(node.dataset.controlIndex)], key = node.dataset.controlField;
+                if (!row) return;
+                row[key] = node.type === 'checkbox' ? node.checked : node.type === 'number' ? (node.value === '' ? null : Number(node.value)) : node.value;
+                if (row._media && /^(path|source_path|mask_path)$/.test(key)) delete row._media[key];
+                hooks.change();
+            }
+            node.addEventListener('input', update);
+            node.addEventListener('change', function () { update(); hooks.render(); });
+        });
+        panel.querySelectorAll('[data-control-action]').forEach(function (node) { node.addEventListener('click', function () {
+            if (!mutable()) return;
+            var action = node.dataset.controlAction, index = Number(node.dataset.controlIndex);
+            if (action === 'upload') { panel.querySelectorAll('[data-control-files]')[0].click(); return; }
+            if (action === 'add') { if (controls.length >= limit) return; controls.push(C.createControl('', policy)); }
+            else if (action === 'remove') controls.splice(index, 1);
+            else if (action === 'move') { var target = index + Number(node.dataset.controlDelta); if (target < 0 || target >= controls.length) return; controls.splice(target, 0, controls.splice(index, 1)[0]); }
+            changed();
+        }); });
+        panel.querySelectorAll('[data-control-files]').forEach(function (node) { node.addEventListener('change', function () { upload(Array.from(node.files || [])); }); });
+        panel.querySelectorAll('[data-control-upload-field]').forEach(function (node) { node.addEventListener('change', function () { upload(Array.from(node.files || []).slice(0, 1), controls[Number(node.dataset.controlIndex)], node.dataset.controlUploadField); }); });
+    }
+
+    function featureInspectorHtml() {
+        var shot = selectedShot(), lock = shot.locked || baseShotMutationBlocked(shot);
+        var features = (h3Runner() || {}).features || {};
+        var issue = C.featureIssue(shot, features);
+        var loras = Array.isArray(shot.lora) ? shot.lora : [];
+        var controls = Array.isArray(shot.controls) ? shot.controls : [];
+        function policyNote(name) {
+            var policy = features[name];
+            return policy && policy.available === true ? 'Configured maximum: ' + policy.max_count + (policy.validation ? ' · ' + policy.validation : '') : 'Unavailable in this native deployment';
+        }
+        function actions(kind, index) {
+            return '<span class="h3s-ref-actions">' + [-1, 1, 0].map(function (delta) {
+                return '<button class="h3s-btn h3s-icon-btn" data-feature-action="' + (delta ? 'move' : 'remove') + '" data-feature-kind="' + kind + '" data-feature-index="' + index + '" data-feature-delta="' + delta + '"' + disabled(lock) + '>' + (delta < 0 ? '↑' : delta > 0 ? '↓' : '×') + '</button>';
+            }).join('') + '</span>';
+        }
+        function field(kind, index, key, value, label, numeric) {
+            return '<label class="h3s-field"><span>' + label + '</span><input class="h3s-input" type="' + (numeric ? 'number' : 'text') + '"' + (numeric ? ' step="any"' : '') +
+                ' data-feature-kind="' + kind + '" data-feature-index="' + index + '" data-feature-field="' + key + '" value="' + attr(value) + '"' + disabled(lock) + '></label>';
+        }
+        return (issue ? '<div class="h3s-warning h3s-error">' + escapeHtml(issue) + '</div>' : '') +
+            '<div class="h3s-section-head"><span class="h3s-kicker">Ordered H3 LoRAs</span><button class="h3s-btn" data-h3-action="add-lora"' + disabled(lock) + '>Add</button></div>' +
+            '<div class="h3s-help">' + escapeHtml(policyNote('lora')) + '. Checkpoint compatibility is checked by the native frontend.</div>' +
+            '<datalist id="h3s-lora-names">' + state.loraNames.map(function (name) { return '<option value="' + attr(name) + '"></option>'; }).join('') + '</datalist>' +
+            loras.map(function (row, index) {
+                row = row && typeof row === 'object' ? row : {};
+                var key = row.path !== undefined ? 'path' : 'name';
+                return '<div class="h3s-ref"><div class="h3s-ref-top"><strong>LoRA ' + (index + 1) + '</strong>' + actions('lora', index) + '</div>' +
+                    '<label class="h3s-field"><span>Locate by</span><select class="h3s-select" data-feature-kind="lora" data-feature-index="' + index + '" data-feature-field="locator"' + disabled(lock) + '><option value="name"' + selected(key, 'name') + '>Installed name</option><option value="path"' + selected(key, 'path') + '>Server path</option></select></label>' +
+                    field('lora', index, key, row[key] || '', key === 'name' ? 'Installed name' : 'Server path', false).replace(' data-feature-kind=', ' list="h3s-lora-names" data-feature-kind=') +
+                    field('lora', index, 'weight', row.weight === undefined ? 1 : row.weight, 'Weight · negative values supported', true) + '</div>';
+            }).join('') +
+            controlInspectorHtml(controls, features.controlnet, lock || state.controlsUploading);
+    }
+
+    function referenceInspectorHtml(shot, policy) {
+        shot = shot || selectedShot();
+        var lock = shot.locked;
+        var limits = policy ? policy.kinds.map(function (kind) { return policy['max_' + kind + 's'] + ' ' + kind; }).join(' · ') + ' · ' + policy.max_total + ' total' : '9 images · 3 videos · 3 audio · 12 total';
+        return '<div class="h3s-panel-head"><div><div class="h3s-kicker">Ordered reference pack</div><div class="h3s-help" style="margin-top:4px">' + escapeHtml(limits) + '</div></div><button class="h3s-btn is-primary" data-h3-action="upload-references"' + disabled(lock) + '>Add files</button></div>' +
             '<div class="h3s-ref-list">' + (shot.references.length ? shot.references.map(function (item, index) {
+                var mediaUrl = item.url || (String(item.path).indexOf('/uploads/') >= 0
+                    ? '/out/uploads/' + encodeURIComponent(String(item.path).split('/').pop()) : '');
+                var preview = !mediaUrl ? '' : item.kind === 'image'
+                    ? '<a href="' + attr(mediaUrl) + '" target="_blank" rel="noopener"><img class="h3s-ref-preview" src="' + attr(mediaUrl) + '" alt="Reference ' + (index + 1) + ' image"></a>'
+                    : '<' + (item.kind === 'audio' ? 'audio' : 'video') + ' class="h3s-ref-preview" controls preload="metadata" src="' + attr(mediaUrl) + '"></' + (item.kind === 'audio' ? 'audio' : 'video') + '>';
                 return '<div class="h3s-ref"><div class="h3s-ref-top"><span class="h3s-ref-order">' + String(index + 1).padStart(2, '0') + '</span><span class="h3s-ref-kind">' + escapeHtml(item.kind) + '</span><span class="h3s-ref-path" title="' + attr(item.path) + '">' + escapeHtml(item.path) + '</span><span class="h3s-ref-actions"><button class="h3s-btn h3s-icon-btn" data-ref-move="-1" data-ref-index="' + index + '">↑</button><button class="h3s-btn h3s-icon-btn" data-ref-move="1" data-ref-index="' + index + '">↓</button><button class="h3s-btn h3s-icon-btn is-danger" data-ref-remove="' + index + '">×</button></span></div>' +
+                    preview +
                     (item.kind === 'audio' ? '<select class="h3s-select" data-ref-field="audio_use" data-ref-index="' + index + '"><option value="reference"' + selected(item.audio_use, 'reference') + '>Reference signal</option><option value="reuse"' + selected(item.audio_use, 'reuse') + '>Reuse signal</option><option value="voice_timbre"' + selected(item.audio_use, 'voice_timbre') + '>Voice timbre</option></select>' : '<select class="h3s-select" data-ref-field="role" data-ref-index="' + index + '"><option value="subject"' + selected(item.role, 'subject') + '>Subject / identity</option><option value="source_video"' + selected(item.role, 'source_video') + '>Source video / edit</option><option value="keyframe"' + selected(item.role, 'keyframe') + '>Keyframe / composition</option><option value="motion_camera"' + selected(item.role, 'motion_camera') + '>Motion / camera</option><option value="environment_style"' + selected(item.role, 'environment_style') + '>Environment / style</option></select>') +
                     '<input class="h3s-input" data-ref-field="note" data-ref-index="' + index + '" value="' + attr(item.note) + '" placeholder="What to keep/use and what to ignore/remove">' +
                     ((item.kind === 'video' || item.kind === 'audio') ? '<input class="h3s-input" type="number" min="2" max="15" step=".1" data-ref-field="duration_seconds" data-ref-index="' + index + '" value="' + attr(item.duration_seconds) + '" aria-label="Reference duration">' : '') + '</div>';
-            }).join('') : '<div class="h3s-help">Add image, video, or audio files. Uploads are stored by the server; browser-local paths are never invented.</div>') + '</div>';
+            }).join('') : '<div class="h3s-help">Add ' + escapeHtml(policy ? policy.kinds.join(' or ') : 'image, video, or audio') + ' files. Uploads are stored by the server; browser-local paths are never invented.</div>') + '</div>';
     }
 
     function assetInspectorHtml() {
@@ -344,8 +489,8 @@ var H3StudioTab = (function () {
     }
 
     function rightHtml() {
-        var tabs = [['shot', 'Shot'], ['sound', 'Sound'], ['references', 'References'], ['assets', 'Assets']];
-        var body = state.inspectorTab === 'shot' ? shotInspectorHtml() : state.inspectorTab === 'sound' ? soundInspectorHtml() : state.inspectorTab === 'references' ? referenceInspectorHtml() : assetInspectorHtml();
+        var tabs = [['shot', 'Shot'], ['sound', 'Sound'], ['references', 'References'], ['features', 'LoRA / Control'], ['assets', 'Assets']];
+        var body = state.inspectorTab === 'shot' ? shotInspectorHtml() : state.inspectorTab === 'sound' ? soundInspectorHtml() : state.inspectorTab === 'references' ? referenceInspectorHtml() : state.inspectorTab === 'features' ? featureInspectorHtml() : assetInspectorHtml();
         return '<aside class="h3s-right"><div class="h3s-inspector-tabs">' + tabs.map(function (tab) { return '<button class="h3s-tab ' + (state.inspectorTab === tab[0] ? 'is-active' : '') + '" data-inspector-tab="' + tab[0] + '">' + tab[1] + '</button>'; }).join('') + '</div><div class="h3s-inspector-body">' + body + '</div></aside>';
     }
 
@@ -421,6 +566,13 @@ var H3StudioTab = (function () {
 
     function bindRenderedEvents() {
         var panel = document.getElementById('panel-h3-studio');
+        var controlShot = selectedShot(), controls = controlShot.controls;
+        if (Array.isArray(controls)) bindControlEditor(panel, controls, ((h3Runner() || {}).features || {}).controlnet, {
+            canMutate: function () { return state.project.shots.indexOf(controlShot) >= 0 && controlShot.controls === controls && featureMutable(controlShot); },
+            isUploading: function () { return state.controlsUploading; },
+            uploading: function (value) { state.controlsUploading = value; },
+            change: saveProject, render: render, error: function (message) { setStatus(message, 'error'); showToast(message, 'error'); }
+        });
         panel.querySelectorAll('[data-select-shot]').forEach(function (node) {
             node.addEventListener('click', function () { state.selectedShotId = Number(node.dataset.selectShot); state.requestJson = ''; render(); });
         });
@@ -433,6 +585,11 @@ var H3StudioTab = (function () {
         });
         panel.querySelectorAll('[data-shot-field]').forEach(function (node) {
             var eventName = node.tagName === 'TEXTAREA' || node.type === 'text' ? 'input' : 'change';
+            // Keep numeric edits before another control redraws the inspector;
+            // defer the redraw itself until the edit is committed.
+            if (node.type === 'number') node.addEventListener('input', function () {
+                if (node.value !== '') setShotField(node.dataset.shotField, node);
+            });
             node.addEventListener(eventName, function () { setShotField(node.dataset.shotField, node); if (eventName === 'change') render(); });
         });
         panel.querySelectorAll('[data-endless-field]').forEach(function (node) {
@@ -455,6 +612,35 @@ var H3StudioTab = (function () {
             });
         });
         panel.querySelectorAll('[data-ref-move]').forEach(function (node) { node.addEventListener('click', function () { moveReference(Number(node.dataset.refIndex), Number(node.dataset.refMove)); }); });
+        panel.querySelectorAll('[data-feature-field]').forEach(function (node) {
+            function update() {
+                var shot = selectedShot();
+                if (!featureMutable(shot)) return;
+                var stack = shot[node.dataset.featureKind], index = Number(node.dataset.featureIndex);
+                if (!Array.isArray(stack) || !stack[index] || typeof stack[index] !== 'object') return;
+                var row = stack[index], key = node.dataset.featureField;
+                if (key === 'locator') {
+                    var text = row.path === undefined ? row.name : row.path;
+                    delete row.name; delete row.path; row[node.value] = text || '';
+                } else row[key] = node.type === 'number' ? (node.value === '' ? null : Number(node.value)) : node.value;
+                saveProject();
+            }
+            node.addEventListener('input', update);
+            node.addEventListener('change', function () { update(); render(); });
+        });
+        panel.querySelectorAll('[data-feature-action]').forEach(function (node) { node.addEventListener('click', function () {
+            var shot = selectedShot();
+            if (!featureMutable(shot)) return;
+            var stack = shot[node.dataset.featureKind], index = Number(node.dataset.featureIndex);
+            if (!Array.isArray(stack) || index < 0 || index >= stack.length) return;
+            if (node.dataset.featureAction === 'remove') stack.splice(index, 1);
+            else {
+                var target = index + Number(node.dataset.featureDelta);
+                if (target < 0 || target >= stack.length) return;
+                stack.splice(target, 0, stack.splice(index, 1)[0]);
+            }
+            saveProject(); render();
+        }); });
         panel.querySelectorAll('[data-ref-remove]').forEach(function (node) { node.addEventListener('click', function () { if (baseShotMutationBlocked(selectedShot())) { showToast('The endless base references are immutable during the active run.', 'error'); return; } selectedShot().references.splice(Number(node.dataset.refRemove), 1); selectedShot().prompt_override = ''; saveProject(); render(); }); });
         panel.querySelectorAll('[data-asset-remove]').forEach(function (node) { node.addEventListener('click', function () { state.project.assets.splice(Number(node.dataset.assetRemove), 1); saveProject(); render(); }); });
         panel.querySelectorAll('[data-h3-action]').forEach(function (node) { node.addEventListener('click', function () { handleAction(node.dataset.h3Action); }); });
@@ -487,6 +673,22 @@ var H3StudioTab = (function () {
         document.getElementById('h3s-asset-file').addEventListener('change', function (event) { uploadAsset(event.target.files[0]); });
     }
 
+    function featureMutable(shot) {
+        if (!shot || shot.locked || baseShotMutationBlocked(shot)) {
+            showToast('Unlock the shot and finish any active endless run before changing LoRAs or controls.', 'error'); return false;
+        }
+        return true;
+    }
+
+    function addFeature(kind) {
+        var shot = selectedShot();
+        if (!featureMutable(shot)) return;
+        if (shot[kind] === undefined) shot[kind] = [];
+        if (!Array.isArray(shot[kind])) { showToast('Invalid imported ' + kind + ' stack: fix the project JSON first.', 'error'); return; }
+        shot[kind].push(kind === 'lora' ? { name: '', weight: 1 } : { path: '', strength: 1, start: 0, end: 1, preprocessor: 'prepared' });
+        saveProject(); render();
+    }
+
     function mediaKind(file) {
         var type = String(file && file.type || '');
         if (type.indexOf('video/') === 0) return 'video';
@@ -514,6 +716,7 @@ var H3StudioTab = (function () {
                 var kind = mediaKind(file); var ref = C.createReference(kind, data.path || data.name || '');
                 ref.role = kind === 'video' && selectedShot().references.every(function (item) { return item.role !== 'source_video'; }) ? 'source_video' : 'subject';
                 ref.note = file.name; selectedShot().references.push(ref);
+                ref.url = data.url || '';
             }); });
         });
         chain.then(function () { selectedShot().prompt_override = ''; saveProject(); setStatus('References uploaded and ordered', ''); render(); })
@@ -549,6 +752,7 @@ var H3StudioTab = (function () {
         else if (action === 'upload-last') document.getElementById('h3s-last-file').click();
         else if (action === 'upload-references') document.getElementById('h3s-reference-files').click();
         else if (action === 'upload-asset') document.getElementById('h3s-asset-file').click();
+        else if (action === 'add-lora') addFeature('lora');
         else if (action === 'render-shot') renderShot();
         else if (action === 'continue-take') continueTake();
         else if (action === 'start-endless') startEndless();
@@ -684,11 +888,12 @@ var H3StudioTab = (function () {
 
     function continueTake() {
         var shot = selectedShot();
+        if (shot.controls && shot.controls.length) { showToast('ControlNet cannot be combined with native continuation. Create a separate shot without controls explicitly.', 'error'); return; }
         if (shot.selected_take < 0) { showToast('Select a finished take first (queue one, wait for Ready)', 'error'); return; }
         if (!selectedTakeDone()) { showToast('The selected take is still ' + (shot.take_states[shot.selected_take] || 'pending') + ' — continuation needs its finished motion context', 'error'); return; }
         var jobId = shot.take_job_ids[shot.selected_take] || '';
         if (!jobId) { setStatus('Selected take has no H3 job id', 'error'); showToast('Selected take has no H3 job id', 'error'); return; }
-        addShot(); var next = selectedShot(); next.continue_from = jobId; next.motion_context_frames = 22; next.brief = 'Continue naturally from the approved take while preserving identity, motion, camera, lighting, sound and story state.'; next.title = 'Continue ' + shot.title; saveProject('Continuation shot created'); state.inspectorTab = 'shot'; render();
+        addShot(); var next = selectedShot(); next.continue_from = jobId; next.motion_context_frames = 22; next.lora = C.copy(shot.lora || []); next.brief = 'Continue naturally from the approved take while preserving identity, motion, camera, lighting, sound and story state.'; next.title = 'Continue ' + shot.title; saveProject('Continuation shot created'); state.inspectorTab = 'shot'; render();
     }
 
     function endlessBaseShot(run) {
@@ -721,9 +926,12 @@ var H3StudioTab = (function () {
     }
 
     function startEndless() {
+        if (state.controlsUploading) { showToast('Wait for control media uploads to finish.', 'error'); return; }
         var draft = endlessState();
         try {
             var base = selectedShot();
+            var featureIssue = C.featureIssue(base, (h3Runner() || {}).features || {});
+            if (featureIssue) throw new Error(featureIssue);
             var resolvedAttention = resolvedH3Attention(base);
             if (base.attention_backend !== resolvedAttention) base.attention_backend = resolvedAttention;
             var run = C.createEndlessRun(base, draft.target_seconds, draft.segment_seconds, draft.continuation_direction);
@@ -804,6 +1012,8 @@ var H3StudioTab = (function () {
             assertEndlessResumeSafe(run);
             var segmentShot = C.endlessSegmentShot(run, index);
             var request = C.renderRequest(segmentShot);
+            var featureIssue = C.featureIssue(segmentShot, (h3Runner() || {}).features || {});
+            if (featureIssue) throw new Error(featureIssue);
             var expectedSnapshot = C.copy(run.base_snapshot);
             state.endlessSubmitting = true;
             run.status = 'submitting'; run.error = ''; run.updated_at = new Date().toISOString();
@@ -943,6 +1153,7 @@ var H3StudioTab = (function () {
     }
 
     function renderShot() {
+        if (state.controlsUploading) { showToast('Wait for control media uploads to finish.', 'error'); return; }
         var shot = selectedShot();
         if (endlessChainShotLocked(shot)) {
             showToast('The active endless chain owns this shot. Select another shot to queue an independent manual render.', 'error'); return;
@@ -959,6 +1170,24 @@ var H3StudioTab = (function () {
                 requestShot = C.copy(shot); requestShot.attention_backend = resolvedAttention;
             }
             var request = C.renderRequest(requestShot);
+            var runner = h3Runner();
+            if (!runner || !h3Ready()) throw new Error('H3 compiler runtime prerequisites are unavailable.');
+            var featureIssue = C.featureIssue(requestShot, runner.features || {});
+            if (featureIssue) throw new Error(featureIssue);
+            var constraints = runner.geometry_constraints || {};
+            if (constraints.shape_policy === 'sealed_native_profile') {
+                if (request.width !== constraints.width_min || request.height !== constraints.height_min ||
+                    request.frames !== constraints.frames || request.fps !== constraints.fps_min ||
+                    request.steps !== constraints.steps || request.output_frames !== constraints.frames) {
+                    throw new Error('H3 currently requires ' + constraints.width_min + '×' + constraints.height_min + ', ' +
+                        constraints.frames + ' frames at ' + constraints.fps_min + ' FPS, ' + constraints.steps + ' steps.');
+                }
+            }
+            if (request.task !== 't2va' && !(runner.conditioned_modes || []).some(function (mode) {
+                return mode.id === request.task && mode.available_modes && mode.available_modes[request.quant];
+            })) throw new Error('H3 task ' + request.task + ' is not available in the native compiler yet.');
+            if (!(runner.step_cache_modes || []).some(function (mode) { return mode.id === request.step_cache && mode.available; }))
+                throw new Error('The selected H3 denoise cache is not implemented by this runner.');
             if (!window.confirm('Queue one ' + C.secondsText(shot.duration_seconds) + '-second H3 take at ' + shot.width + '×' + shot.height + '? This starts GPU work.')) return;
             setStatus('Submitting H3 take…', 'live');
             SerenityAPI.postVideo(request).then(function (job) {
@@ -1014,7 +1243,11 @@ var H3StudioTab = (function () {
         if (state.initialized) return;
         state.initialized = true; state.project = loadProject(); state.selectedShotId = state.project.shots[0].id;
         render(); loadReadiness(); resumeEndless();
+        fetch('/models/loras').then(function (response) { return response.ok ? response.json() : []; })
+            .then(function (names) { state.loraNames = Array.isArray(names) ? names.filter(function (name) { return typeof name === 'string'; }) : []; render(); })
+            .catch(function () { /* Manual installed names and server paths remain usable. */ });
     }
 
-    return { init: init, render: render, state: state, contracts: C };
+    return { init: init, render: render, state: state, contracts: C, referenceInspectorHtml: referenceInspectorHtml,
+        controlInspectorHtml: controlInspectorHtml, bindControlEditor: bindControlEditor };
 })();

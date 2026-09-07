@@ -1,11 +1,11 @@
-//! Phase-A seam proof: spawn the REAL Mojo CPU stub worker over the AF_UNIX
+//! Phase-A seam proof: spawn the native worker's CPU stub over the AF_UNIX
 //! socketpair IPC, drive one job to completion, and assert the output PNG exists.
 //!
 //! This exercises the full `spawn_worker` → `next_event` (Ready) → `send_start`
 //! → `next_event*` (Progress…Done) loop against
 //! `<repository>/output/bin/serenity_worker_stub`, the same binary the
-//! Rust control plane drives in production. No Mojo build is required here — the
-//! stub binary already exists (CPU-only).
+//! Rust control plane drives in production. Run scripts/build.sh first; its
+//! stub alias targets serenity_worker_difc, not a Mojo executable.
 //!
 //! Run:  cargo test -p serenity-ipc -- --nocapture
 

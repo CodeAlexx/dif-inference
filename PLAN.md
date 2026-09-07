@@ -1,5 +1,40 @@
 # diffusion-compiler-ui — inference serving layer for the Diffusion Compiler
 
+## Current host override — 2026-09-06
+
+H3 feature work remains in progress; see
+`evidence/H3_NATIVE_FEATURES_2026-09-06.md`. After a session OOM, heavy work is
+serial and pressure-guarded (`config/runtime.json`), not merely child-capped.
+Ref2VA modulation preparation now completes under 4 GiB after fixing final-use
+file-page retention. Ref2VA's ConvRot cache and full new-feature decoded gates
+are still pending. Krea remains outside this H3 work.
+
+Later update: SDXL Base 1.0 now uses `difsdxlsample` through the shared worker,
+with real positive/negative prompts, Euler/normal and UI progress. Actual
+1024-square 50-step browser output was viewed; see
+`evidence/SDXL_UI_GATE_2026-09-06.md`. Dev was explicitly deferred after the
+current cache search found its W4 transformer but no usable Mistral encoder.
+No BF16 redownload or Dev loading changes. Register all local image profiles
+with `scripts/register-image-models.sh`.
+
+This clone is `/home/alex/dif-inference`, with Rust sources in
+`serenity-server/` and JSON configuration in `config/difc.json`. The original
+5080 inventory below is historical, not the current host's performance claim.
+Alex requested Klein Base 4B/9B integration and restoration of the companion
+compiler's ordinary loader. That request includes the missing 4B compiler
+frontend/config work; the original as-is-compiler restriction below describes
+the initial UI-only assignment, not this new model intake.
+
+The default local profile is RTX 3090 Ti BF16, shared native executable,
+per-variant Qwen encoder and one mapped Diffusers-layout VAE. Build and register
+local model links with the scripts in `README.md`. The prior configuration is
+preserved in `config/difc.5080.json`. No Mojo source or weights were downloaded
+or modified. Creator source alone was cloned for an offline numeric oracle.
+Current evidence and limitations:
+`evidence/KLEIN_4B_9B_INTAKE_2026-09-06.md`.
+
+---
+
 Written 2026-09-05 after a read-only inventory of `/home/alex/diffusion-compiler`
 (HEAD 74fc0f4), `/home/alex/diffusion-compiler-docs`, `/home/alex/mojodiffusion/
 serenity-server` (Rust control plane + canvas web UI) and `/home/alex/SerenityUI`

@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "memory_max": "24G",
+  "memory_swap_max": "2G",
+  "desktop_reserve": "16G",
+  "server": {
+    "binary": "${repo}/serenity-server/target/release/serenity-server",
+    "worker": "${repo}/output/bin/serenity_worker_difc",
+    "model_root": "${repo}/models",
+    "output_dir": "${repo}/output/run",
+    "port": 7811
+  },
+  "build": {
+    "jobs": 1,
+    "manifest": "${repo}/serenity-server/Cargo.toml",
+    "target_dir": "${repo}/serenity-server/target",
+    "memory_wrapper": "${repo}/scripts/mem_safe_runtime.sh"
+  },
+  "runtime": {
+    "memory_guard": {
+      "lock_file": "/tmp/dif-inference-heavy.lock",
+      "telemetry_dir": "output/runtime-guard",
+      "sample_seconds": 0.25,
+      "pressure_window_seconds": 2,
+      "full_pressure_percent": 10,
+      "some_pressure_percent": 20,
+      "admission_pressure_percent": 5,
+      "child_soft_fraction": 0.9,
+      "startup_timeout_seconds": 15,
+      "maximum_runtime_seconds": 3600
+    },
+    "cuda_cache": "${repo}/output/cuda_cache_video",
+    "memory_wrapper": "${repo}/scripts/mem_safe_runtime.sh",
+    "library_paths": [],
+    "environment": {
+      "CUDA_MODULE_LOADING": "EAGER",
+      "LD_BIND_NOW": "1",
+      "CUDA_FORCE_PRELOAD_LIBRARIES": "1"
+    },
+    "memory_high": "infinity"
+  },
+  "registry": [
+    {
+      "name": "checkpoints/flux-2-klein-base-4b.safetensors",
+      "source_key": "flux2_klein_base_4b.transformer_checkpoint",
+      "optional": true
+    },
+    {
+      "name": "checkpoints/flux-2-klein-base-9b.safetensors",
+      "source_key": "flux2_klein_base_9b.transformer_checkpoint",
+      "optional": true
+    },
+    {
+      "name": "checkpoints/sd_xl_base_1.0.safetensors",
+      "source_key": "sdxl.checkpoint",
+      "optional": true
+    },
+    {
+      "name": "checkpoints/MiniMax-H3/FL2VA",
+      "source_key": "minimax_h3.checkpoint",
+      "optional": true
+    }
+  ],
+  "image_profiles": {
+    "flux2_klein_base_4b": {
+      "aliases": [
+        "flux-2-klein-base-4b",
+        "flux.2-klein-base-4b"
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 50,
+        "cfg": 4,
+        "sampler": "euler",
+        "scheduler": "simple"
+      },
+      "family": "flux2",
+      "production_entry": "${compiler_build}/difflux2sample",
+      "artifacts": [
+        {
+          "label": "transformer checkpoint",
+          "path_key": "flux2_klein_base_4b.transformer_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "VAE checkpoint",
+          "path_key": "flux2_klein_base_4b.vae_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "Qwen text encoder",
+          "path_key": "flux2_klein_base_4b.text_encoder_dir",
+          "suffix": "",
+          "kind": "directory"
+        },
+        {
+          "label": "Qwen shard index",
+          "path_key": "flux2_klein_base_4b.text_encoder_dir",
+          "suffix": "model.safetensors.index.json",
+          "kind": "file"
+        },
+        {
+          "label": "tokenizer",
+          "path_key": "flux2_klein_base_4b.tokenizer_dir",
+          "suffix": "",
+          "kind": "directory"
+        }
+      ]
+    },
+    "flux2_klein_base_9b": {
+      "aliases": [
+        "flux-2-klein-base-9b",
+        "flux.2-klein-base-9b"
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 50,
+        "cfg": 4,
+        "sampler": "euler",
+        "scheduler": "simple"
+      },
+      "family": "flux2",
+      "production_entry": "${compiler_build}/difflux2sample",
+      "artifacts": [
+        {
+          "label": "transformer checkpoint",
+          "path_key": "flux2_klein_base_9b.transformer_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "VAE checkpoint",
+          "path_key": "flux2_klein_base_9b.vae_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "Qwen text encoder",
+          "path_key": "flux2_klein_base_9b.model_dir",
+          "suffix": "text_encoder",
+          "kind": "directory"
+        },
+        {
+          "label": "Qwen shard index",
+          "path_key": "flux2_klein_base_9b.model_dir",
+          "suffix": "text_encoder/model.safetensors.index.json",
+          "kind": "file"
+        },
+        {
+          "label": "tokenizer",
+          "path_key": "flux2_klein_base_9b.model_dir",
+          "suffix": "tokenizer",
+          "kind": "directory"
+        }
+      ]
+    },
+    "sdxl": {
+      "aliases": [
+        "sd_xl_base_1.0",
+        "sdxl-base-1.0"
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 50,
+        "cfg": 7,
+        "sampler": "euler",
+        "scheduler": "normal"
+      },
+      "family": "sdxl",
+      "production_entry": "${compiler_build}/difsdxlsample",
+      "artifacts": [
+        {
+          "label": "complete SDXL checkpoint",
+          "path_key": "sdxl.checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "CLIP vocabulary",
+          "path_key": "sdxl.tokenizer_dir",
+          "suffix": "vocab.json",
+          "kind": "file"
+        },
+        {
+          "label": "CLIP merges",
+          "path_key": "sdxl.tokenizer_dir",
+          "suffix": "merges.txt",
+          "kind": "file"
+        }
+      ]
+    },
+    "krea2_turbo": {
+      "aliases": [
+        "krea2-turbo",
+        "krea-2-turbo"
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8,
+        "cfg": 0,
+        "sampler": "euler",
+        "scheduler": "simple"
+      },
+      "family": "krea2",
+      "production_entry": "${krea2.runner}",
+      "artifacts": [
+        {
+          "label": "Krea transformer",
+          "path_key": "krea2.turbo_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "conditioner program",
+          "path_key": "krea2.conditioner_program",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "conditioner bundle",
+          "path_key": "krea2.conditioner_bundle",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "processor",
+          "path_key": "krea2.qwen_processor",
+          "suffix": "",
+          "kind": "directory"
+        },
+        {
+          "label": "VAE weights",
+          "path_key": "krea2.vae_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "VAE config",
+          "path_key": "krea2.vae_config",
+          "suffix": "",
+          "kind": "file"
+        }
+      ]
+    },
+    "krea2_raw": {
+      "aliases": [
+        "krea2-raw",
+        "krea-2-raw"
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 52,
+        "cfg": 3.5,
+        "sampler": "euler",
+        "scheduler": "simple"
+      },
+      "family": "krea2",
+      "production_entry": "${krea2.runner}",
+      "artifacts": [
+        {
+          "label": "Krea transformer",
+          "path_key": "krea2.raw_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "conditioner program",
+          "path_key": "krea2.conditioner_program",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "conditioner bundle",
+          "path_key": "krea2.conditioner_bundle",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "processor",
+          "path_key": "krea2.qwen_processor",
+          "suffix": "",
+          "kind": "directory"
+        },
+        {
+          "label": "VAE weights",
+          "path_key": "krea2.vae_checkpoint",
+          "suffix": "",
+          "kind": "file"
+        },
+        {
+          "label": "VAE config",
+          "path_key": "krea2.vae_config",
+          "suffix": "",
+          "kind": "file"
+        }
+      ]
+    }
+  },
+  "minimax_h3": {
+    "runner": "${repo}/scripts/h3_compiler_runner.sh",
+    "request_profiles": "${repo}/serenitymojo/configs/minimax_h3_request_profiles.json",
+    "processor": "${minimax_h3.checkpoint}/processor",
+    "transformer_index": "${minimax_h3.checkpoint}/transformer/model.safetensors.index.json",
+    "text_encoder_index": "${minimax_h3.checkpoint}/text_encoder/model.safetensors.index.json",
+    "conditioner_bundle": "${minimax_h3.fixture_dir}/conditioner-s439.difbind",
+    "denoiser_bundle": "${minimax_h3.fixture_dir}/h3-832x480x124-t439-tables2-exact-cudnn.difbind",
+    "video_program": "${minimax_h3.fixture_dir}/decoder-native-tile-l36.difir",
+    "video_bundle": "${minimax_h3.fixture_dir}/decoder-native-tile-l36.difbind",
+    "audio_program": "${minimax_h3.fixture_dir}/audio.difir",
+    "audio_bundle": "${minimax_h3.fixture_dir}/audio.difbind",
+    "modulation_cache": "${minimax_h3.checkpoint}/serenity_runtime_cache_v1/modcache_steps_20_blocks_50.safetensors",
+    "required_tools": [
+      "${compiler_build}/diftokenize",
+      "${compiler_build}/difcondition",
+      "${compiler_build}/difc",
+      "${compiler_build}/difweights",
+      "${compiler_build}/difh3noise",
+      "${compiler_build}/difh3infer",
+      "${compiler_build}/difvaedecode",
+      "${compiler_build}/difaudiodecode",
+      "${compiler_build}/difh3media"
+    ],
+    "int8_route": "convrot",
+    "profile": {
+      "task": "t2va",
+      "seed": 0,
+      "step_cache": "exact",
+      "step_cache_modes": ["exact", "high"],
+      "id": "minimax-h3-832x480x124-24fps",
+      "width": 832,
+      "height": 480,
+      "frames": 124,
+      "fps": 24,
+      "steps": 20,
+      "blocks": 50,
+      "quant": "int8",
+      "sampler": "euler",
+      "attention": "ck-int8",
+      "program_attention": "cudnn",
+      "timestep_tables": 2,
+      "quant_modes": [
+        "int8",
+        "int8-fast",
+        "bf16"
+      ]
+    },
+    "policy": {
+      "low_vram_total_mib": 18432,
+      "low_vram_min_free_mib": 13500,
+      "min_free_mib": 768,
+      "int8_mlp_chunk_rows": 2048,
+      "streamed_stage_threads": 4,
+      "streamed_keep_mapped_pages": true
+    },
+    "decoder": {
+      "latent_id": 1,
+      "raw_id": 1223,
+      "clip_length": 17,
+      "token_drop": 3,
+      "tile_size": 256,
+      "tile_overlap": 64,
+      "encoder": "libx264",
+      "ffmpeg": "/usr/bin/ffmpeg",
+      "rgb_mux_args": ["-c:v", "${minimax_h3.decoder.encoder}", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "32000", "-ac", "2"]
+    },
+    "warm_artifacts": [
+      {
+        "label": "MiniMax-H3 text encoder",
+        "path": "${minimax_h3.checkpoint}/text_encoder"
+      },
+      {
+        "label": "MiniMax-H3 resident denoiser ConvRot pack",
+        "path": "${minimax_h3.convrot_int8}",
+        "quant_modes": [
+          "int8",
+          "int8-fast"
+        ]
+      },
+      {
+        "label": "MiniMax-H3 transformer source",
+        "path": "${minimax_h3.checkpoint}/transformer"
+      },
+      {
+        "label": "MiniMax-H3 audio VAE",
+        "path": "${minimax_h3.checkpoint}/audio_vae/model.safetensors"
+      },
+      {
+        "label": "MiniMax-H3 video VAE",
+        "path": "${minimax_h3.checkpoint}/video_vae/source/model.safetensors"
+      }
+    ]
+  },
+  "krea2": {
+    "runner": "${repo}/scripts/krea2_chain.sh",
+    "min_free_mib": 1024,
+    "resident_order": "largest",
+    "streamed_stage_threads": 4
+  }
+}

@@ -40,7 +40,7 @@ impl ModelFamily {
             ModelFamily::ZImage => "serenity_worker_zimage",
             ModelFamily::QwenImage => "serenity_worker_qwenimage",
             ModelFamily::Ideogram4 => "serenity_worker_ideogram4",
-            ModelFamily::Sdxl => "serenity_worker_sdxl",
+            ModelFamily::Sdxl => "serenity_worker_difc",
             ModelFamily::Anima => "serenity_worker_anima",
             ModelFamily::Sd3 => "serenity_worker_sd3",
             ModelFamily::Flux => "serenity_worker_flux",
@@ -136,6 +136,14 @@ pub(crate) fn model_family_for_arch(arch: &str) -> Option<ModelFamily> {
 }
 
 pub(crate) fn model_family(model: &str) -> Result<ModelFamily, String> {
+    if let Some((key, _)) = difc_config::image_profile(model) {
+        match key {
+            "flux2_klein_base_4b" | "flux2_klein_base_9b" => return Ok(ModelFamily::Flux2),
+            "sdxl" => return Ok(ModelFamily::Sdxl),
+            "krea2_turbo" | "krea2_raw" => return Ok(ModelFamily::Krea2),
+            _ => {},
+        }
+    }
     let m = model.trim().to_ascii_lowercase();
     if m.is_empty() || m.contains("select model") {
         return Err("model is required".to_string());
@@ -199,13 +207,15 @@ pub(crate) fn model_family(model: &str) -> Result<ModelFamily, String> {
 /// family keeps its full capability entry so the UI is built for it; only
 /// families with a compiler chain are admitted at preflight.
 pub(crate) fn compiler_serves(family: ModelFamily, model: &str) -> Result<(), String> {
-    let m = model.trim().to_ascii_lowercase();
+    let configured = difc_config::image_profile(model).map(|(key, _)| key);
     match family {
-        ModelFamily::Flux2 if m.contains("klein") && m.contains("base") && m.contains("9b") => Ok(()),
+        ModelFamily::Flux2 if matches!(configured, Some("flux2_klein_base_4b" | "flux2_klein_base_9b")) => Ok(()),
         ModelFamily::Flux2 => Err(format!(
-            "{model}: the Diffusion Compiler serves FLUX.2 [klein] Base 9B only (undistilled 50-step); other Klein variants are not ported yet"
+            "{model}: this deployment serves FLUX.2 [klein] Base 9B and Base 4B (undistilled 50-step); distilled, KV, FP8 and Dev profiles are not wired here"
         )),
         ModelFamily::Krea2 => Ok(()),
+        ModelFamily::Sdxl if configured == Some("sdxl") => Ok(()),
+        ModelFamily::Sdxl => Err(format!("{model}: this deployment has an SDXL Base 1.0 compiler profile only; configure and gate other checkpoints separately")),
         other => Err(format!(
             "{model}: family '{}' is not ported to the Diffusion Compiler yet; the UI keeps the family so its chain can be added (served today: FLUX.2 [klein] Base 9B, Krea 2 Turbo / Raw)",
             other.backend_key()
@@ -215,7 +225,7 @@ pub(crate) fn compiler_serves(family: ModelFamily, model: &str) -> Result<(), St
 
 pub(crate) fn compiler_family_status(family: ModelFamily) -> &'static str {
     match family {
-        ModelFamily::Flux2 | ModelFamily::Krea2 => "admitted",
+        ModelFamily::Flux2 | ModelFamily::Krea2 | ModelFamily::Sdxl => "admitted",
         _ => "not_ported",
     }
 }
@@ -329,6 +339,7 @@ pub(crate) fn default_cfg_for_family(family: ModelFamily) -> f64 {
 }
 
 pub(crate) fn default_steps_for_model(model: &str, family: ModelFamily) -> i64 {
+    if let Some(steps) = difc_config::image_profile(model).and_then(|(_, p)| p["defaults"]["steps"].as_i64()) { return steps; }
     let normalized = model.to_ascii_lowercase();
     if family == ModelFamily::Flux2 && normalized.contains("base") {
         // Official FLUX.2 Klein Base inference profile: undistilled, 50 steps.
@@ -355,6 +366,7 @@ pub(crate) fn default_steps_for_model(model: &str, family: ModelFamily) -> i64 {
 }
 
 pub(crate) fn default_cfg_for_model(model: &str, family: ModelFamily) -> f64 {
+    if let Some(cfg) = difc_config::image_profile(model).and_then(|(_, p)| p["defaults"]["cfg"].as_f64()) { return cfg; }
     let normalized = model.to_ascii_lowercase();
     if family == ModelFamily::Flux2 && normalized.contains("base") {
         // Base is not guidance-distilled; BFL's model card specifies CFG 4.0.
@@ -380,6 +392,11 @@ pub(crate) fn default_cfg_for_model(model: &str, family: ModelFamily) -> f64 {
 /// describe the backend; this record preserves checkpoint variants such as
 /// Base, Turbo, and distilled without frontend filename guesses.
 pub(crate) fn generation_defaults_for_model_arch(model: &str, arch: &str) -> Option<JsonValue> {
+    if let Some((_, profile)) = difc_config::image_profile(model) {
+        let mut defaults = profile["defaults"].clone();
+        defaults["source"] = json!("deployment_json");
+        return Some(defaults);
+    }
     let family = model_family_for_arch(arch)?;
     Some(json!({
         "source": "server_model_profile",
@@ -436,7 +453,7 @@ const IMAGE_1024_ASPECT_SIZES: &[(i64, i64)] = &[
 const SAMPLERS_EULER: &[&str] = &["euler"];
 const SAMPLERS_EULER_FLOWMATCH: &[&str] = &["euler", "flowmatch_euler"];
 const SAMPLERS_FLOWMATCH_DPM2M: &[&str] = &["euler", "flowmatch_euler", "dpmpp_2m"];
-const SAMPLERS_SDXL: &[&str] = &["euler", "ddim", "dpmpp_2m"];
+const SAMPLERS_SDXL: &[&str] = &["euler"];
 const SAMPLERS_ZIMAGE: &[&str] = &[
     "euler",
     "flowmatch_euler",
@@ -449,7 +466,7 @@ const SCHEDULERS_SIMPLE: &[&str] = &["simple"];
 // it; klein_runtime maps it onto its flow-match schedule) alongside "simple".
 const SCHEDULERS_FLUX2: &[&str] = &["simple", "flux2"];
 const SCHEDULERS_NORMAL: &[&str] = &["normal"];
-const SCHEDULERS_SDXL: &[&str] = &["normal", "karras", "exponential", "simple", "ddim_uniform"];
+const SCHEDULERS_SDXL: &[&str] = &["normal"];
 const SCHEDULERS_ZIMAGE: &[&str] = &["simple", "sgm_uniform"];
 const SCHEDULERS_IDEOGRAM4: &[&str] = &["ideogram_logitnormal", "simple"];
 const SCHEDULERS_SWARM_FLUX: &[&str] = &[
@@ -1328,15 +1345,15 @@ fn capability_for_family(family: ModelFamily) -> JsonValue {
         )
     };
 
-    json!({
+    let mut profile = json!({
         "backend": family.backend_key(),
         "model_family": family.backend_key(),
         "production_status": compiler_family_status(family),
         "engine": "diffusion-compiler",
         "compiler_status": {
-            "served": matches!(family, ModelFamily::Flux2 | ModelFamily::Krea2),
-            "served_models": match family { ModelFamily::Flux2 => vec!["FLUX.2 [klein] Base 9B"], ModelFamily::Krea2 => vec!["Krea 2 Turbo", "Krea 2 Raw"], _ => Vec::<&str>::new() },
-            "note": if family == ModelFamily::Flux2 { "native prompt-to-PNG chain (difflux2sample), quality- and performance-gated on the RTX 5080" } else if family == ModelFamily::Krea2 { "native chain from raw checkpoints (diftokenize -> difcondition -> difkrea2text -> difkrea2sample --initial-seed -> difkrea2vae); 1024x1024" } else { "no Diffusion Compiler chain for this family yet; requests are refused at preflight with this reason" },
+            "served": matches!(family, ModelFamily::Flux2 | ModelFamily::Krea2 | ModelFamily::Sdxl),
+            "served_models": match family { ModelFamily::Flux2 => vec!["FLUX.2 [klein] Base 9B", "FLUX.2 [klein] Base 4B"], ModelFamily::Krea2 => vec!["Krea 2 Turbo", "Krea 2 Raw"], ModelFamily::Sdxl => vec!["SDXL Base 1.0"], _ => Vec::<&str>::new() },
+            "note": if family == ModelFamily::Flux2 { "native Base 9B/4B text-to-PNG through one difflux2sample executable; local checkpoint and execution policy from config/difc.json; no transferred RTX 5080 performance claim" } else if family == ModelFamily::Krea2 { "native chain from raw checkpoints (diftokenize -> difcondition -> difkrea2text -> difkrea2sample --initial-seed -> difkrea2vae); 1024x1024" } else { "no Diffusion Compiler chain for this family yet; requests are refused at preflight with this reason" },
         },
         "worker_binary": family.worker_binary_name(),
         "defaults": {
@@ -1381,7 +1398,27 @@ fn capability_for_family(family: ModelFamily) -> JsonValue {
             "video": unsupported_feature("video models use separate bounded video endpoints/gates, not /v1/generate"),
             "advanced_sampling": advanced_sampling_feature_for_family(family),
         },
-    })
+    });
+    if family == ModelFamily::Flux2 {
+        // This fork serves the native compiler chain, not the inherited Mojo
+        // ReferenceLatent/LoRA worker described by the older capability table.
+        profile["limits"]["txt2img_only"] = json!(true);
+        for feature in ["negative_prompt", "lora", "multi_lora", "image_to_image",
+                        "inpaint", "instruction_edit", "image_conditioning"] {
+            profile["features"][feature] = unsupported_feature(
+                "the compiler Klein chain currently serves text-to-image only; no negative prompt, LoRA or reference image route");
+        }
+    }
+    if family == ModelFamily::Sdxl {
+        profile["compiler_status"]["note"] = json!("native difsdxlsample prompt-to-PNG; full local Base checkpoint including both CLIP towers and VAE; Euler/normal only");
+        profile["samplers"]["supported_samplers"] = json!(["euler"]);
+        profile["samplers"]["supported_schedulers"] = json!(["normal"]);
+        for feature in ["lora", "multi_lora", "image_to_image", "inpaint",
+                        "instruction_edit", "image_conditioning", "advanced_sampling"] {
+            profile["features"][feature] = unsupported_feature("the native SDXL compiler chain currently supports text-to-image, CFG and negative prompts only");
+        }
+    }
+    profile
 }
 
 pub(crate) fn capability_profile_for_model(model: &str) -> JsonValue {
@@ -1412,6 +1449,9 @@ pub(crate) fn capability_profile_for_model(model: &str) -> JsonValue {
                 JsonValue::String("/v1/capabilities".to_string()),
             );
             if let Some(defaults) = obj.get_mut("defaults").and_then(JsonValue::as_object_mut) {
+                if let Some(configured) = difc_config::image_profile(model).and_then(|(_, p)| p["defaults"].as_object()) {
+                    defaults.extend(configured.clone());
+                }
                 defaults.insert(
                     "steps".to_string(),
                     JsonValue::from(default_steps_for_model(model, family)),
@@ -1881,13 +1921,11 @@ mod tests {
         let sdxl = capability_for_family(ModelFamily::Sdxl);
         assert_eq!(krea2["features"]["instruction_edit"]["supported"], true);
         assert_eq!(ideogram4["features"]["instruction_edit"]["supported"], true);
-        assert_eq!(flux2["features"]["instruction_edit"]["supported"], true);
-        assert_eq!(
-            flux2["features"]["instruction_edit"]["engine"],
-            "reference_latent"
-        );
-        assert_eq!(flux2["features"]["image_conditioning"]["supported"], true);
-        assert_eq!(flux2["limits"]["txt2img_only"], false);
+        assert_eq!(flux2["features"]["instruction_edit"]["supported"], false);
+        assert_eq!(flux2["features"]["image_conditioning"]["supported"], false);
+        assert_eq!(flux2["features"]["lora"]["supported"], false);
+        assert_eq!(flux2["features"]["negative_prompt"]["supported"], false);
+        assert_eq!(flux2["limits"]["txt2img_only"], true);
         assert_eq!(sdxl["features"]["instruction_edit"]["supported"], false);
         assert_eq!(sdxl["features"]["image_to_image"]["supported"], false);
     }
@@ -2066,10 +2104,29 @@ mod tests {
 
         let four_b = capability_profile_for_model("flux-2-klein-base-4b");
         assert_eq!(four_b["backend"], "flux2");
-        assert_eq!(four_b["production_status"], "not_ported");
-        assert_eq!(four_b["compiler_served"], false);
+        assert_eq!(four_b["production_status"], "admitted");
+        assert_eq!(four_b["compiler_served"], true);
+        assert_eq!(four_b["defaults"]["steps"], 50);
+        assert_eq!(four_b["defaults"]["cfg"], 4.0);
+        assert_eq!(distilled["compiler_served"], false);
         assert_eq!(base["compiler_served"], true);
-        assert_eq!(four_b["features"]["instruction_edit"]["supported"], true);
+        assert_eq!(four_b["features"]["instruction_edit"]["supported"], false);
+    }
+
+    #[test]
+    fn sdxl_compiler_profile_is_native_and_bounded() {
+        let profile = capability_profile_for_model("sd_xl_base_1.0");
+        assert_eq!(profile["compiler_served"], true);
+        assert_eq!(profile["worker_binary"], "serenity_worker_difc");
+        assert_eq!(profile["defaults"]["steps"], 50);
+        assert_eq!(profile["defaults"]["cfg"], 7.0);
+        assert_eq!(profile["samplers"]["supported_samplers"], json!(["euler"]));
+        assert_eq!(profile["samplers"]["supported_schedulers"], json!(["normal"]));
+        assert_eq!(profile["features"]["negative_prompt"]["supported"], true);
+        assert_eq!(profile["features"]["lora"]["supported"], false);
+        assert_eq!(profile["features"]["advanced_sampling"]["supported"], false);
+        assert_eq!(capability_profile_for_model("sdxl_unet_bf16")["compiler_served"], false);
+        assert!(model_family("flux2-dev").is_err());
     }
 
     #[test]

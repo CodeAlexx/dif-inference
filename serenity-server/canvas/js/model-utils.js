@@ -357,6 +357,32 @@ var ModelUtils = (function () {
             };
         });
     }
+    function displayModelName(identity) {
+        var raw = String(identity || '');
+        var lower = raw.toLowerCase();
+        if (!raw)
+            return raw;
+        if (/minimax[-_]?h3[-_]?fun[-_]?controlnet[-_]?union/.test(lower))
+            return 'H3 ControlNet Union';
+        if (/qwen3vl[_-]?32b.*minimax[_-]?h3.*nvfp4.*awq/.test(lower))
+            return 'Qwen3-VL 32B \u00b7 NVFP4/AWQ';
+        if (/minimax[_-]?h3.*video[_-]?vae.*fp16/.test(lower))
+            return 'H3 Video VAE \u00b7 FP16';
+        if (/minimax[_-]?h3.*audio[_-]?vae.*fp32/.test(lower))
+            return 'H3 Audio VAE \u00b7 FP32';
+        var family = /(?:^|[\/_-])ref2va(?:[\/_-]|$)/.test(lower)
+            ? 'Ref2VA'
+            : (/(?:^|[\/_-])fl2va(?:[\/_-]|$)/.test(lower) ? 'FL2VA' : '');
+        if (!family || !/minimax[-_]?h3/.test(lower))
+            return raw;
+        if (/int8[_-]?rowscale/.test(lower))
+            return family + ' \u00b7 INT8 row-scale';
+        if (/bf16/.test(lower) || /\/transformer\/model\.safetensors\.index\.json$/.test(lower)) {
+            return family + ' \u00b7 BF16 \u00b7 ' +
+                (/single[_-]?file/.test(lower) ? 'single-file' : 'sharded');
+        }
+        return raw;
+    }
     function clearCache() {
         objectInfoCache = null;
         modelRegistryCache = null;
@@ -369,6 +395,7 @@ var ModelUtils = (function () {
     }
     return {
         detectArchFromFilename: detectArchFromFilename,
+        displayModelName: displayModelName,
         archForModel: archForModel,
         isVideoModel: isVideoModel,
         VIDEO_RESOLUTIONS: VIDEO_RESOLUTIONS,

@@ -48,59 +48,15 @@ pub(crate) fn warm_artifacts(
 
     let identity = model.trim().to_ascii_lowercase();
     if identity.contains("minimax") || identity.contains("h3") {
-        let is_ref = task == "ref2va";
-        let root = model_path(if is_ref {
-            MINIMAX_H3_REF2VA_MODEL_ROOT
-        } else {
-            MINIMAX_H3_MODEL_ROOT
-        });
-        let mut artifacts = vec![
-            WarmArtifact::new(
-                "MiniMax-H3 text encoder INT8 store",
-                model_path(MINIMAX_H3_ENCODER_CACHE),
-            ),
-            WarmArtifact::new(
-                "MiniMax-H3 conditioning cache",
-                model_path(MINIMAX_H3_CONDITIONING_CACHE),
-            ),
-        ];
-        let modulation = if is_ref {
-            MINIMAX_H3_REF2VA_MODULATION_CACHE
-        } else if matches!(task, "i2va" | "l2va" | "fl2va" | "continue") {
-            MINIMAX_H3_CONDITIONED_MODULATION_CACHE
-        } else {
-            MINIMAX_H3_MODULATION_CACHE
-        };
-        artifacts.push(WarmArtifact::new(
-            "MiniMax-H3 modulation runtime cache",
-            model_path(modulation),
-        ));
-        if let Some(cache) = minimax_h3_resident_cache_path(quant, is_ref) {
-            artifacts.push(WarmArtifact::new(
-                "MiniMax-H3 resident denoiser runtime cache",
-                cache,
-            ));
-        }
-        // The quantized runtime stores own the blocks, while the source tree
-        // still owns shared tensors. BF16 streams all transformer shards.
-        artifacts.push(WarmArtifact::new(
-            "MiniMax-H3 transformer source",
-            root.join("transformer"),
-        ));
-        artifacts.extend([
-            WarmArtifact::new(
-                "MiniMax-H3 audio VAE",
-                root.join("audio_vae/model.safetensors"),
-            ),
-            WarmArtifact::new(
-                "MiniMax-H3 video VAE",
-                root.join("video_vae/source/model.safetensors"),
-            ),
-            WarmArtifact::new("MiniMax-H3 processor", root.join("processor")),
-        ]);
+        let artifacts = difc_config::current().ok()
+            .and_then(|doc| doc["minimax_h3"]["warm_artifacts"].as_array())
+            .into_iter().flatten()
+            .filter(|entry| entry.get("quant_modes").and_then(Value::as_array)
+                .is_none_or(|modes| modes.iter().any(|mode| mode == quant)))
+            .filter_map(|entry| Some(WarmArtifact::new(entry["label"].as_str()?, entry["path"].as_str()?)))
+            .collect();
         return (format!("minimax_h3:{task}:{quant}"), artifacts);
     }
-
     if identity.contains("ltx") {
         let mut artifacts = vec![
             WarmArtifact::new("LTX Gemma text encoder", model_path(LTX2_GEMMA_FP8)),
@@ -292,8 +248,6 @@ fn nonempty_file(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-const MINIMAX_H3_CK_DSO_NAME: &str = "libserenity_ck_attention.so";
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct NvidiaGpuIdentity {
     index: String,
@@ -384,8 +338,10 @@ fn current_nvidia_gpu_identity() -> Option<NvidiaGpuIdentity> {
     select_nvidia_gpu(&inventory, visible_devices.as_deref()).cloned()
 }
 
-fn minimax_h3_ck_dso_path_for_sm(sm: u32) -> std::path::PathBuf {
-    repo_path(&format!("output/lib/ck/sm{sm}/{MINIMAX_H3_CK_DSO_NAME}"))
+fn minimax_h3_ck_dso_path_for_sm(sm: u32) -> Option<std::path::PathBuf> {
+    let doc = difc_config::current().ok()?;
+    doc["minimax_h3"]["ck_attention_libraries"][sm.to_string()]
+        .as_str().map(std::path::PathBuf::from)
 }
 
 fn minimax_h3_ck_attention_capability() -> MiniMaxH3CkAttentionCapability {
@@ -398,7 +354,15 @@ fn minimax_h3_ck_attention_capability() -> MiniMaxH3CkAttentionCapability {
             reason: "cannot identify the active NVIDIA compute capability".to_string(),
         };
     };
-    let dso_path = minimax_h3_ck_dso_path_for_sm(gpu.sm);
+    let Some(dso_path) = minimax_h3_ck_dso_path_for_sm(gpu.sm) else {
+        return MiniMaxH3CkAttentionCapability {
+            reason: format!("Ck-INT8 library is not configured for SM{}", gpu.sm),
+            gpu: Some(gpu),
+            dso_path: None,
+            available: false,
+            status: "exact_sm_dso_missing",
+        };
+    };
     if !nonempty_file(&dso_path) {
         return MiniMaxH3CkAttentionCapability {
             reason: format!(
@@ -592,6 +556,7 @@ fn readiness_doc() -> Value {
     let minimax_h3_default = minimax_h3_default_profile();
     let minimax_h3_profile_documents = minimax_h3_profiles
         .iter()
+        .filter(|profile| profile.id == minimax_h3_default.id)
         .map(minimax_h3_profile_document)
         .collect::<Vec<_>>();
     let minimax_h3_int8_missing = minimax_h3_missing(minimax_h3_default, "int8");
@@ -609,7 +574,8 @@ fn readiness_doc() -> Value {
     let minimax_h3_ready =
         minimax_h3_int8_fast_ready || minimax_h3_int8_ready || minimax_h3_bf16_ready;
     let minimax_h3_ck_capability = minimax_h3_ck_attention_capability();
-    let minimax_h3_ck_attention_ready = minimax_h3_ready && minimax_h3_ck_capability.available;
+    let minimax_h3_ck_attention_ready = minimax_h3_ready && minimax_h3_ck_capability.available
+        && difc_config::current().is_ok_and(|doc| doc["minimax_h3"]["profile"]["attention"] == "ck-int8");
     let minimax_h3_ck_status = if !minimax_h3_ready {
         "h3_runtime_unavailable"
     } else {
@@ -782,10 +748,11 @@ fn readiness_doc() -> Value {
         },
         {
             "model": "minimax_h3_t2va",
+            "features": compiler_h3_features_document(),
             "status": if minimax_h3_ready { "runtime_geometry_ready" } else if minimax_h3_conditioned_ready { "conditioned_runtime_geometry_ready" } else { "prerequisites_missing" },
-            "runner": MINIMAX_H3_REQUEST_RUNNER,
+            "runner": minimax_h3_runner(),
             "runner_topology": "one_request_runner_runtime_geometry_length_fps_and_quant",
-            "mode": "phase-isolated: GPU text encode + denoise -> fresh GPU VAE decode -> NVENC mux",
+            "mode": "Diffusion Compiler: text encode + denoise -> fresh video/audio decode -> configured media encoder",
             "request_schema": "serenity.genparams.v1",
             "status_schema": "serenity.minimax_h3.status.v1",
             "result_schema": "serenity.minimax_h3.result.v1",
@@ -793,63 +760,37 @@ fn readiness_doc() -> Value {
             "asynchronous": true,
             "process_separated_decode": true,
             "runtime_cache": {
-                "conditioning": MINIMAX_H3_CONDITIONING_CACHE,
-                "modulation_steps_20": MINIMAX_H3_MODULATION_CACHE,
-                "int8_groupwise_cache_blocks_48": MINIMAX_H3_INT8_RESIDENT_CACHE,
-                "int8_fast_w8a8_blocks_50": MINIMAX_H3_INT8_FAST_RESIDENT_CACHE,
-                "generated_on_first_use": true,
-                "byte_exact_latent_parity": true,
+                "modulation": difc_config::current().ok().map(|doc| &doc["minimax_h3"]["modulation_cache"]),
+                "convrot_int8": difc_h3_convrot_pack(),
+                "generated_on_first_use": false,
                 "gpu_model_execution_only": true,
             },
             "supported_profiles": minimax_h3_profile_documents,
-            "supported_profiles_role": "measured low-VRAM benchmark anchors; not user-facing H3 output resolutions",
-            "geometry_constraints": {
-                "shape_policy": "h3_base_adapt_shape_v1",
-                "base_short_edge": MINIMAX_H3_BASE_SHORT_EDGE,
-                "max_pixels": MINIMAX_H3_NATIVE_MAX_PIXELS,
-                "width_min": MINIMAX_H3_MIN_DIMENSION,
-                "width_max": MINIMAX_H3_MAX_DIMENSION,
-                "height_min": MINIMAX_H3_MIN_DIMENSION,
-                "height_max": MINIMAX_H3_MAX_DIMENSION,
-                "dimension_step": MINIMAX_H3_DIMENSION_STEP,
-                "resolutions": minimax_h3_native_resolution_documents(),
-                "resolution_role": "tested_presets_not_an_exhaustive_allowlist",
-                "seconds_min": MINIMAX_H3_MIN_SECONDS,
-                "seconds_max": MINIMAX_H3_MAX_SECONDS,
-                "trained_seconds_max": MINIMAX_H3_TRAINED_MAX_SECONDS,
-                "long_context_max_sequence_tokens": MINIMAX_H3_LONG_CONTEXT_MAX_SEQUENCE_TOKENS,
-                "long_context_tasks": ["t2va", "i2va", "l2va", "fl2va", "continue"],
-                "long_context_policy": "experimental_single_pass_resolution_duration_tradeoff",
-                "fps_min": 1,
-                "fps_max": 120,
-                "internal_frame_alignment": "17n+5; output is trimmed/resampled to authored seconds and FPS",
-            },
+            "supported_profiles_role": "selected sealed native profile",
+            "geometry_constraints": compiler_h3_geometry_document(),
             "quant_modes": [
                 {
                     "id": "int8-fast",
-                    "label": "INT8 Fast · profile-tuned W8A8 resident",
+                    "label": "ConvRot INT8 · legacy Fast alias",
                     "available": minimax_h3_int8_fast_ready,
                     "missing": minimax_h3_int8_fast_missing,
-                    "dtype_contract": "direct_w8a8_profile_resident_prefix_w8a8_cached_tail_int8_text_encoder_bf16_outputs_f32_reductions",
-                    "accepted_base_full20_denoise_seconds": 174.577378981_f64,
-                    "visual_inspection_passed": true,
+                    "dtype_contract": "convrot_h256_int8_dit_bf16_conditioner",
+                    "same_execution_as": "int8",
                 },
                 {
                     "id": "int8",
-                    "label": "INT8 Quality · profile-tuned groupwise + BF16 tail",
+                    "label": "ConvRot INT8 · native compiler",
                     "available": minimax_h3_int8_ready,
                     "missing": minimax_h3_int8_missing,
-                    "dtype_contract": "groupwise_int8_profile_resident_prefix_bf16_tail_int8_text_encoder_bf16_activations_f32_reductions",
-                    "registered_resident_blocks": 41,
-                    "hot_one_eval_seconds": 22.268046142_f64,
-                    "historical_43_block_full20_seconds_not_registered": 377.228794159_f64,
+                    "dtype_contract": "convrot_h256_int8_dit_bf16_conditioner",
+                    "registered_resident_blocks": difc_config::current().ok().map(|doc| &doc["minimax_h3"]["resident_layers"]),
                 },
                 {
                     "id": "bf16",
                     "label": "BF16 DiT quality · streamed",
                     "available": minimax_h3_bf16_ready,
                     "missing": minimax_h3_bf16_missing,
-                    "dtype_contract": "bf16_dit_streamed_int8_text_encoder_bf16_activations_f32_reductions",
+                    "dtype_contract": "bf16_dit_streamed_bf16_conditioner",
                 }
             ],
             "attention_backends": [
@@ -867,30 +808,19 @@ fn readiness_doc() -> Value {
                     "current_sm": minimax_h3_ck_sm,
                     "selected_dso": minimax_h3_ck_dso,
                     "selection_policy": "exact_active_gpu_sm_only",
-                    "portable_fallback": "cudnn",
-                    "measurement_status": if minimax_h3_ck_sm == Some(86) { "measured_sm86" } else { "unmeasured_current_gpu" },
-                    "measured_reference": {
-                        "gpu": "NVIDIA GeForce RTX 3090 Ti",
-                        "compute_capability": "8.6",
-                        "sm": 86,
-                        "kernel_cosine": 0.9998600836968164_f64,
-                        "kernel_ms_s19029_h56": 69.63113825_f64,
-                        "full20_denoise_seconds": 262.314619493_f64,
-                        "second_prompt_full20_denoise_seconds": 274.286097767_f64,
-                        "decoded_visual_prompt_gate_count": 2,
-                        "decoded_visual_inspection_passed": true,
-                    },
+                    "implementation": "codealexx_h3_dense_int8",
                 },
                 {
                     "id": "cudnn",
                     "label": "cU-DNN · quality default",
-                    "available": minimax_h3_ready,
-                    "accepted_quality_default": true,
+                    "available": minimax_h3_ready && difc_config::current().is_ok_and(|doc| doc["minimax_h3"]["profile"]["attention"] == "cudnn"),
+                    "accepted_quality_default": false,
                 },
                 {
                     "id": "sage-int8",
                     "label": "Sage INT8 · experimental",
-                    "available": minimax_h3_ready,
+                    "available": false,
+                    "reason": "not implemented by the native compiler request runner",
                     "quant_modes": ["int8-fast", "int8"],
                     "accepted_quality_default": false,
                     "kernel_cosine": 0.9999076619386169_f64,
@@ -907,10 +837,18 @@ fn readiness_doc() -> Value {
                 },
                 {
                     "id": "high",
-                    "label": "Experimental cached · faster, quality loss",
-                    "available": minimax_h3_ready || minimax_h3_conditioned_ready,
+                    "label": "Middle-block cache · experimental",
+                    "available": (minimax_h3_ready || minimax_h3_conditioned_ready)
+                        && difc_config::current().is_ok_and(|doc| {
+                            let profile = &doc["minimax_h3"]["profile"];
+                            match profile.get("step_cache_modes") {
+                                Some(modes) => modes.as_array().is_some_and(|modes| modes.contains(&json!("high"))),
+                                None => profile["step_cache"] == "high",
+                            }
+                        }),
                     "exact": false,
                     "accepted_quality_default": false,
+                    "validation": "cpu_and_tiny_cuda_mechanics; full_model_quality_pending",
                     "policy": "fn8_bn8_warmup4_threshold0.12_max_continuous2_max_cached1_group32_int8_residual",
                 }
             ],
@@ -1192,6 +1130,10 @@ pub async fn post_video(State(st): State<AppState>, body: String) -> Response {
     // Fail closed before taking the GPU lease or evicting an idle image model.
     // A partially installed or non-accepted video arm is not a GPU operation.
     if model == "minimax_h3" {
+        b = compiler_h3_request_defaults(&b, difc_config::current().expect("deployment config"));
+        if let Err(error) = validate_compiler_h3_request(&b) {
+            return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error);
+        }
         if let Err(error) = validate_minimax_h3_request(&b) {
             return err_detail(StatusCode::UNPROCESSABLE_ENTITY, &error);
         }

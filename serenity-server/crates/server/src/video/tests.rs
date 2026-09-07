@@ -3,6 +3,194 @@
 use super::*;
 
 #[test]
+fn minimax_h3_compiler_defaults_come_from_json_and_preserve_explicit_values() {
+    let mut doc = difc_config::current().unwrap().clone();
+    doc["minimax_h3"]["profile"]["quant"] = json!("bf16");
+    let body = compiler_h3_request_defaults(&json!({"model":"minimax_h3", "prompt":"test"}), &doc);
+    assert_eq!(body["quant"], "bf16");
+    assert_eq!(body["width"], doc["minimax_h3"]["profile"]["width"]);
+    assert_eq!(body["attention_backend"], doc["minimax_h3"]["profile"]["attention"]);
+    assert!(validate_compiler_h3_request(&body).is_ok());
+    let explicit = compiler_h3_request_defaults(&json!({"task":"i2va", "quant":"int8", "steps":null}), &doc);
+    assert_eq!(explicit["task"], "i2va");
+    assert_eq!(explicit["quant"], "int8");
+    assert!(explicit["steps"].is_null());
+}
+
+#[test]
+fn minimax_h3_compiler_keyframes_validate_and_stage_without_resizing() {
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("difc-h3-keyframes-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("input with spaces.png");
+    let pixels = image::RgbImage::from_fn(64, 32, |x, y| image::Rgb([x as u8, y as u8, 127]));
+    pixels.save(&source).unwrap();
+    let mut request = json!({"task":"fl2va", "source_image":source, "last_frame":source});
+    let inputs = compiler_h3_keyframes(&request, 64, 32).unwrap();
+    assert_eq!(inputs.len(), 2);
+    let args = stage_compiler_h3_keyframes(&inputs, &root).unwrap();
+    assert!(args[0].starts_with("--source-image="));
+    assert!(args[1].starts_with("--last-frame="));
+    assert_eq!(image::open(root.join("source_image.png")).unwrap().to_rgb8(), pixels);
+    assert!(compiler_h3_keyframes(&request, 32, 64).unwrap_err().contains("must be 32x64"));
+    request["task"] = json!("t2va");
+    assert!(compiler_h3_keyframes(&request, 64, 32).unwrap_err().contains("does not consume"));
+    request["task"] = json!("i2va");
+    request.as_object_mut().unwrap().remove("last_frame");
+    assert_eq!(compiler_h3_keyframes(&request, 64, 32).unwrap().len(), 1);
+    request["task"] = json!("l2va");
+    request["last_frame"] = request["source_image"].clone();
+    request.as_object_mut().unwrap().remove("source_image");
+    assert_eq!(compiler_h3_keyframes(&request, 64, 32).unwrap().len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn minimax_h3_compiler_references_preserve_audio_order_roles_and_staging() {
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let root = std::env::temp_dir().join(format!("difc-h3-references-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("image with spaces.png");
+    let pixels = image::RgbImage::from_fn(4, 6, |x, y| image::Rgb([x as u8, y as u8, 127]));
+    pixels.save(&source).unwrap();
+
+    // A two-second, 16 kHz mono PCM fixture exercises the existing stereo
+    // resampling path without a model, GPU, or external source media.
+    let audio = root.join("audio with spaces.wav");
+    let data_len = 16000_u32 * 2 * 2;
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&16000_u32.to_le_bytes());
+    wav.extend_from_slice(&32000_u32.to_le_bytes());
+    wav.extend_from_slice(&2_u16.to_le_bytes());
+    wav.extend_from_slice(&16_u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.resize(44 + data_len as usize, 0);
+    std::fs::write(&audio, wav).unwrap();
+
+    let mut doc = difc_config::h3_task_document(difc_config::current().unwrap(), "ref2va").unwrap();
+    doc["minimax_h3"]["task_configs"] = json!({});
+    doc["minimax_h3"]["references"]["kinds"] = json!(["image", "audio"]);
+    let mut request = json!({"task":"ref2va", "prompt":"summary:\nMake the scene.", "references":[
+        {"kind":"audio", "path":audio, "audio_use":"reuse"},
+        {"kind":"image", "path":source},
+        {"kind":"audio", "path":audio, "audio_use":"voice_timbre"},
+        {"kind":"image", "path":source},
+        {"kind":"audio", "path":audio}
+    ]});
+    let (args, prompt) = stage_compiler_h3_references(&request, &doc, &root).unwrap();
+    assert_eq!(args, vec![
+        format!("--reference-audio={}", root.join("ref_audio_input_0.wav").display()),
+        format!("--reference-image={}", root.join("reference-input-1.png").display()),
+        format!("--reference-audio={}", root.join("ref_audio_input_2.wav").display()),
+        format!("--reference-image={}", root.join("reference-input-3.png").display()),
+        format!("--reference-audio={}", root.join("ref_audio_input_4.wav").display()),
+    ]);
+    assert_eq!(prompt, concat!(
+        "reference_audio_intent:\n",
+        "<Audio 1>: partially_copy - reuse this audio in the target soundtrack where instructed.\n",
+        "<Audio 2>: reference - use its voice timbre for generated speech, without copying its spoken content.\n",
+        "<Audio 3>: reference - use this as an audio-conditioning reference where relevant.\n\n",
+        "summary:\nMake the scene.",
+    ));
+    assert_eq!(image::open(root.join("reference-input-1.png")).unwrap().to_rgb8(), pixels);
+    let probe = probe_video_path(root.join("ref_audio_input_0.wav").to_str().unwrap()).unwrap();
+    assert_eq!(probe["audio_codec"], "pcm_s16le");
+    assert_eq!(probe["audio_sample_rate"], 32000);
+    assert_eq!(probe["audio_channels"], 2);
+    assert_eq!(probe["audio_duration"], 2.0);
+
+    request["references"] = json!([{"kind":"audio", "path":audio}]);
+    assert!(compiler_h3_references(&request, &doc).unwrap_err().contains("must accompany"));
+    request["references"] = json!([
+        {"kind":"image", "path":source},
+        {"kind":"audio", "path":audio}, {"kind":"audio", "path":audio},
+        {"kind":"audio", "path":audio}, {"kind":"audio", "path":audio}
+    ]);
+    assert!(compiler_h3_references(&request, &doc).unwrap_err().contains("at most 3 audio"));
+    request["references"] = json!([{"kind":"image", "path":source}]);
+    let (_, prompt) = stage_compiler_h3_references(&request, &doc, &root).unwrap();
+    assert_eq!(prompt, request["prompt"].as_str().unwrap());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn minimax_h3_compiler_rejects_unimplemented_controls() {
+    let doc = difc_config::current().unwrap();
+    let mut request = doc["minimax_h3"]["profile"].clone();
+    request["attention_backend"] = request["attention"].clone();
+    assert!(validate_compiler_h3_request(&request).is_ok());
+    request["seed"] = json!(-1);
+    assert!(validate_compiler_h3_request(&request).unwrap_err().contains("seed"));
+    request["seed"] = json!(9001);
+    request["step_cache"] = json!("unsupported");
+    assert!(validate_compiler_h3_request(&request).is_err());
+    request["step_cache"] = json!("exact");
+    request["lora"] = json!([{"name":"neutral-test.safetensors", "strength":1.0}]);
+    assert!(validate_compiler_h3_request(&request).unwrap_err().contains("LoRA"));
+    request["lora"] = json!([]);
+    request["task"] = json!("ref2va");
+    assert!(validate_compiler_h3_request(&request).is_err());
+    request["task"] = json!("continue");
+    request["motion_context_frames"] = json!(6);
+    assert!(validate_compiler_h3_request(&request).is_err());
+}
+
+#[test]
+fn minimax_h3_compiler_rejects_zero_lora_before_resolving_weights() {
+    let doc = difc_config::current().unwrap();
+    for weight in [0.0, -0.0, 1.0e-50] {
+        let request = json!({"lora":[{"path":"/missing-test-adapter.safetensors", "weight":weight}]});
+        assert!(compiler_h3_lora_args(&request, doc).unwrap_err().contains("nonzero"));
+    }
+}
+
+#[test]
+fn minimax_h3_compiler_step_cache_uses_json_admission_and_keeps_controlnet_exact() {
+    let mut doc = difc_config::current().unwrap().clone();
+    doc["minimax_h3"]["task_configs"] = json!({});
+    doc["minimax_h3"]["profile"]["step_cache"] = json!("exact");
+    doc["minimax_h3"]["profile"]["step_cache_modes"] = json!(["exact", "high"]);
+    let mut request = compiler_h3_request_defaults(&json!({"task":"t2va"}), &doc);
+    assert_eq!(request["step_cache"], "exact");
+    assert!(validate_compiler_h3_request_in(&request, &doc).is_ok());
+
+    request["step_cache"] = json!("high");
+    assert_eq!(compiler_h3_request_defaults(&request, &doc)["step_cache"], "high");
+    for quant in doc["minimax_h3"]["profile"]["quant_modes"].as_array().unwrap() {
+        request["quant"] = quant.clone();
+        assert!(validate_compiler_h3_request_in(&request, &doc).is_ok());
+    }
+    request["controls"] = json!([]);
+    assert!(validate_compiler_h3_request_in(&request, &doc).is_ok());
+    doc["minimax_h3"]["control"]["enabled"] = json!(true);
+    request["controls"] = json!([{}]);
+    assert!(validate_compiler_h3_request_in(&request, &doc).unwrap_err().contains("ControlNet requires exact"));
+    request["controls"] = json!([]);
+
+    request["attention_backend"] = json!("unsupported");
+    assert!(validate_compiler_h3_request_in(&request, &doc).unwrap_err().contains("attention"));
+    request["attention_backend"] = doc["minimax_h3"]["profile"]["attention"].clone();
+    for invalid in [json!("unsupported"), json!(null), json!(1)] {
+        request["step_cache"] = invalid;
+        assert!(validate_compiler_h3_request_in(&request, &doc).unwrap_err().contains("step_cache"));
+    }
+    request["step_cache"] = json!("high");
+    doc["minimax_h3"]["profile"]["step_cache_modes"] = json!(["exact"]);
+    assert!(validate_compiler_h3_request_in(&request, &doc).unwrap_err().contains("step_cache"));
+    doc["minimax_h3"]["profile"].as_object_mut().unwrap().remove("step_cache_modes");
+    assert!(validate_compiler_h3_request_in(&request, &doc).unwrap_err().contains("step_cache"));
+    request.as_object_mut().unwrap().remove("step_cache");
+    assert!(validate_compiler_h3_request_in(&request, &doc).is_ok());
+}
+
+#[test]
 fn ltx2_prompt_normalization_removes_token_changing_edge_whitespace() {
     let normalized = normalize_ltx2_prompt_fields(&json!({
         "prompt": "  a woman turns toward camera \n",
@@ -243,12 +431,12 @@ fn ltx2_profile_runner_rejects_stale_build_inputs() {
 #[test]
 fn minimax_h3_request_is_runtime_adjustable_and_switchable() {
     let registry = minimax_h3_request_profile_registry();
-    assert_eq!(registry.runner, MINIMAX_H3_REQUEST_RUNNER);
+    assert_eq!(registry.runner, minimax_h3_runner());
     for profile in &registry.profiles {
         for quant in &profile.quant_modes {
             assert_eq!(
                 minimax_h3_request_runner(profile, quant.as_str()),
-                Some(MINIMAX_H3_REQUEST_RUNNER),
+                Some(minimax_h3_runner()),
             );
         }
     }
@@ -440,12 +628,14 @@ fn minimax_h3_request_is_runtime_adjustable_and_switchable() {
 }
 
 #[test]
-fn minimax_h3_generated_caches_and_quality_reports_never_block_use() {
+fn minimax_h3_compiler_requires_sealed_caches_but_not_mojo_quality_reports() {
     let profile = minimax_h3_default_profile();
     for quant in ["int8-fast", "int8", "bf16"] {
         assert!(minimax_h3_profile_mode_supported(profile, quant));
         for missing in minimax_h3_missing(profile, quant) {
-            assert!(!missing.contains("serenity_runtime_cache_v1"), "{missing}");
+            // The native runner consumes a pre-sealed modulation cache. Unlike
+            // the old Mojo runtime, it does not generate this on first use.
+            assert!(!missing.contains("resident_groupwise"), "{missing}");
             assert!(!missing.contains("gate.json"), "{missing}");
         }
         for missing in minimax_h3_conditioned_missing("i2va", quant) {
@@ -511,7 +701,7 @@ fn minimax_h3_native_continuation_preserves_authored_time_and_validates_source()
     }]);
     assert!(minimax_h3_continue_with_references(&request));
     validate_minimax_h3_request(&request).unwrap();
-    assert!(minimax_h3_conditioned_runner("ref2va", "int8").is_some());
+    assert_eq!(minimax_h3_conditioned_runner("ref2va", "int8").as_deref(), Some(minimax_h3_runner()));
     request["duration_seconds"] = json!(16.0);
     request["frames"] = json!(384);
     assert!(validate_minimax_h3_request(&request)
@@ -810,6 +1000,37 @@ fn minimax_h3_runner_log_reports_cache_and_real_denoise_progress() {
 }
 
 #[test]
+fn minimax_h3_native_compiler_progress_counts_completed_evaluations() {
+    let start = minimax_h3_progress_from_log("[difc-h3] phase=denoise start\n", 20).unwrap();
+    assert_eq!(start, ("denoise".into(), 0, 20, "Denoising evaluation 0 of 19".into()));
+    for mode in ["exact", "high"] {
+        let log = format!("[difc-h3] phase=denoise start step_cache={mode}\n");
+        assert_eq!(minimax_h3_progress_from_log(&log, 20).unwrap(), start);
+    }
+
+    let first = "H3_STEP index=0 video_t=0 audio_t=0 denoiser_ms=55899.4 text_refiner_cache=miss\n";
+    let progress = minimax_h3_progress_from_log(first, 20).unwrap();
+    assert_eq!(progress, ("denoise".into(), 1, 20, "Denoising evaluation 1 of 19".into()));
+    let wrapped = format!("{first}[difc-h3] phase=denoise step=1 total=19\n");
+    assert_eq!(minimax_h3_progress_from_log(&wrapped, 20).unwrap(), progress);
+
+    let later = minimax_h3_progress_from_log(
+        "H3_STEP index=6 video_t=0.5 audio_t=0.6 denoiser_ms=54000\n\
+         resident cache: loaded block 1 / 1\n\
+         H3_MIDDLE_CACHE step=7 decision=reuse main_diff=0.01 audio_diff=0.01\n", 20,
+    ).unwrap();
+    assert_eq!(later, ("denoise".into(), 7, 20, "Denoising evaluation 7 of 19".into()));
+    let complete = minimax_h3_progress_from_log(
+        "H3_STEP index=18 video_t=0.99 audio_t=0.99 denoiser_ms=54000\n\
+         [difc-h3] phase=denoise complete\n", 20,
+    ).unwrap();
+    assert_eq!(complete, ("denoise".into(), 19, 20, "Denoising evaluation 19 of 19".into()));
+    assert!(minimax_h3_progress_from_log("H3_STEP index=invalid\n", 20).is_none());
+    assert!(minimax_h3_progress_from_log("H3_STEP index=19\n", 20).is_none());
+    assert!(minimax_h3_progress_from_log("H3_STEP index=0\n", 1).is_none());
+}
+
+#[test]
 fn minimax_h3_ck_attention_selects_the_exact_visible_gpu_sm() {
     let inventory = nvidia_gpu_inventory_from_csv(
         "0, GPU-aaaa1111, 8.6, NVIDIA GeForce RTX 3090 Ti\n\
@@ -830,7 +1051,7 @@ fn minimax_h3_ck_attention_selects_the_exact_visible_gpu_sm() {
     assert_eq!(nvidia_sm_from_compute_capability("12.0"), Some(120));
     assert_eq!(
         minimax_h3_ck_dso_path_for_sm(89),
-        repo_path("output/lib/ck/sm89/libserenity_ck_attention.so")
+        None
     );
 }
 
@@ -1011,30 +1232,19 @@ fn readiness_shape() {
         .iter()
         .find(|entry| entry.get("model").and_then(Value::as_str) == Some("minimax_h3_t2va"))
         .unwrap();
-    assert_eq!(h3["runner"], MINIMAX_H3_REQUEST_RUNNER);
+    assert_eq!(h3["runner"], minimax_h3_runner());
     assert_eq!(
         h3["runner_topology"],
         "one_request_runner_runtime_geometry_length_fps_and_quant"
     );
     assert_eq!(h3["default_steps"], MINIMAX_H3_STEPS);
-    // Profile 0 is the Diffusion Compiler's admitted product geometry; the
-    // Mojo-era profiles follow it unchanged.
-    assert_eq!(h3["supported_profiles"][0]["width"], 832);
-    assert_eq!(h3["supported_profiles"][0]["height"], 480);
-    assert_eq!(h3["supported_profiles"][0]["frames"], 124);
-    assert_eq!(h3["supported_profiles"][1]["width"], MINIMAX_H3_WIDTH);
-    assert_eq!(h3["supported_profiles"][1]["height"], MINIMAX_H3_HEIGHT);
-    assert_eq!(h3["supported_profiles"][1]["frames"], MINIMAX_H3_FRAMES);
-    assert_eq!(h3["supported_profiles"].as_array().unwrap().len(), 13);
-    assert_eq!(h3["supported_profiles"][2]["width"], 512);
-    assert_eq!(h3["supported_profiles"][3]["width"], 512);
-    assert_eq!(h3["supported_profiles"][4]["frames"], 362);
-    assert_eq!(h3["supported_profiles"][4]["duration"], 15.083333);
-    assert_eq!(h3["supported_profiles"][5]["width"], 832);
-    assert_eq!(
-        h3["supported_profiles"][12]["quant_modes"],
-        json!(["int8-fast", "int8", "bf16"])
-    );
+    // Only the selected native profile is a product admission.
+    let config = difc_config::current().unwrap();
+    let native = &config["minimax_h3"]["profile"];
+    assert_eq!(h3["supported_profiles"].as_array().unwrap().len(), 1);
+    for field in ["width", "height", "frames", "fps", "steps"] {
+        assert_eq!(h3["supported_profiles"][0][field], native[field]);
+    }
     assert_eq!(h3["quant_modes"][0]["id"], "int8-fast");
     assert_eq!(h3["quant_modes"][1]["id"], "int8");
     assert_eq!(h3["quant_modes"][2]["id"], "bf16");
@@ -1098,39 +1308,16 @@ fn readiness_shape() {
     );
     assert_eq!(h3["step_cache_modes"][0]["id"], "exact");
     assert_eq!(h3["step_cache_modes"][1]["id"], "high");
-    assert_eq!(
-        h3["geometry_constraints"]["shape_policy"],
-        "h3_base_adapt_shape_v1"
-    );
-    assert_eq!(h3["geometry_constraints"]["base_short_edge"], 768);
-    assert_eq!(h3["geometry_constraints"]["max_pixels"], 768 * 1344);
-    assert_eq!(h3["geometry_constraints"]["width_min"], 32);
-    assert_eq!(h3["geometry_constraints"]["width_max"], 2048);
-    assert_eq!(h3["geometry_constraints"]["height_min"], 32);
-    assert_eq!(h3["geometry_constraints"]["height_max"], 2048);
-    assert_eq!(h3["geometry_constraints"]["dimension_step"], 32);
-    assert_eq!(
-        h3["geometry_constraints"]["resolution_role"],
-        "tested_presets_not_an_exhaustive_allowlist"
-    );
-    assert_eq!(
-        h3["geometry_constraints"]["resolutions"],
-        json!([
-            {"aspect_ratio": "21:9", "width": 1536, "height": 672, "label": "21:9 - 1536x672"},
-            {"aspect_ratio": "16:9", "width": 1344, "height": 768, "label": "16:9 - 1344x768"},
-            {"aspect_ratio": "4:3", "width": 1024, "height": 768, "label": "4:3 - 1024x768"},
-            {"aspect_ratio": "1:1", "width": 768, "height": 768, "label": "1:1 - 768x768"},
-            {"aspect_ratio": "3:4", "width": 768, "height": 1024, "label": "3:4 - 768x1024"},
-            {"aspect_ratio": "9:16", "width": 768, "height": 1344, "label": "9:16 - 768x1344"},
-        ])
-    );
-    assert_eq!(h3["geometry_constraints"]["seconds_min"], 1.0);
-    assert_eq!(h3["geometry_constraints"]["seconds_max"], 180.0);
-    assert_eq!(h3["geometry_constraints"]["trained_seconds_max"], 15.0);
-    assert_eq!(
-        h3["geometry_constraints"]["long_context_max_sequence_tokens"],
-        MINIMAX_H3_LONG_CONTEXT_MAX_SEQUENCE_TOKENS,
-    );
+    assert_eq!(h3["geometry_constraints"], compiler_h3_geometry_document());
+    let native_cache_profile = &difc_config::current().unwrap()["minimax_h3"]["profile"];
+    let high_cache_enabled = match native_cache_profile.get("step_cache_modes") {
+        Some(modes) => modes.as_array().is_some_and(|modes| modes.iter().any(|mode| mode == "high")),
+        None => native_cache_profile["step_cache"] == "high",
+    };
+    assert_eq!(h3["step_cache_modes"][1]["available"], h3["available"] == true && high_cache_enabled);
+    assert_eq!(h3["step_cache_modes"][1]["exact"], false);
+    assert_eq!(h3["step_cache_modes"][1]["accepted_quality_default"], false);
+    assert_eq!(h3["attention_backends"][2]["available"], false);
     assert_eq!(
         h3["prompt_contract"],
         "arbitrary_nonempty_prompt_runtime_conditioning"
@@ -1148,12 +1335,10 @@ fn readiness_shape() {
         h3["conditioned_modes"][4]["motion_context"]["default_frames"],
         22
     );
-    assert_eq!(
-        h3["conditioned_modes"][0]["geometry"]["resolutions"],
-        h3["geometry_constraints"]["resolutions"]
-    );
-    assert_eq!(h3["conditioned_modes"][0]["geometry"]["seconds_max"], 60.0);
-    assert_eq!(h3["conditioned_modes"][3]["geometry"]["seconds_max"], 15.0);
+    assert_eq!(h3["conditioned_modes"][0]["geometry"]["width"], native["width"]);
+    assert_eq!(h3["conditioned_modes"][0]["input_policy"], "exact_canvas_rgb_no_resize");
+    assert_eq!(h3["conditioned_modes"][3]["available"], false);
+    assert_eq!(h3["conditioned_modes"][4]["available"], false);
     assert_eq!(
         h3["conditioned_modes"][3]["available"],
         ["int8-fast", "int8", "bf16"]
@@ -2167,4 +2352,98 @@ fn ltx2_context_cache_reuses_existing_prompt_entry() {
     assert_eq!(cache.path, expected);
     assert_eq!(cache.encoder_seconds, 0.0);
     let _ = std::fs::remove_dir_all(root);
+}
+#[test]
+fn compiler_h3_adapter_and_control_requests_fail_closed() {
+    let doc = json!({"minimax_h3":{
+        "lora":{"enabled":true,"max_count":2,"max_abs_scale":10.0},
+        "control":{"enabled":true,"max_count":2,"max_abs_strength":10.0}
+    }});
+    for field in ["lora", "controls"] {
+        for bad in [json!("bad"), json!({}), json!(["bad"])] {
+            let mut request = json!({"task":"t2va"}); request[field] = bad;
+            if field == "lora" { assert!(compiler_h3_lora_args(&request, &doc).is_err()); }
+            else { assert!(compiler_h3_controls(&request, &doc).is_err()); }
+        }
+    }
+    assert!(compiler_h3_lora_args(&json!({"lora":[]}), &doc).unwrap().is_empty());
+    assert!(compiler_h3_controls(&json!({"controls":null}), &doc).unwrap().is_empty());
+    for bad in [json!({"weight":"1"}), json!({"weight":11}), json!({"path":"/no/such/adapter"})] {
+        assert!(compiler_h3_lora_args(&json!({"lora":[bad]}), &doc).is_err());
+    }
+    for bad in [json!({"source":"x"}), json!({"preprocessor":"canny"}),
+                json!({"strength":"1"}), json!({"start":0.9,"end":0.2})] {
+        assert!(compiler_h3_controls(&json!({"task":"t2va","controls":[bad]}), &doc).is_err());
+    }
+    assert!(compiler_h3_controls(&json!({"task":"ref2va","controls":[{}]}), &doc).is_err());
+    assert!(compiler_h3_controls(&json!({"task":"t2va","step_cache":"high","controls":[{}]}), &doc).is_err());
+}
+
+#[test]
+fn compiler_h3_control_media_ports_mojo_request_fields() {
+    // Zero strength skips heavyweight checkpoint prerequisites, not media parsing.
+    let doc = json!({"minimax_h3":{"control":{
+        "enabled":true,"max_count":4,"max_abs_strength":10.0,
+        "defaults":{"preprocessor":"prepared","resize_mode":"crop",
+            "canny_low":100,"canny_high":200,"strength":0,"start":0,"end":1,"invert_mask":false}
+    }}});
+    let media = std::env::temp_dir().join(format!("difc-control-media-{}.png", std::process::id()));
+    std::fs::write(&media, b"request parsing only").unwrap();
+    let mut request = json!({"task":"t2va","controls":[{
+        "path":media,"preprocessor":"canny","resize_mode":"pad",
+        "canny_low":50,"canny_high":150,"source_path":media,"mask_path":media,"invert_mask":true
+    }]});
+    let rows = compiler_h3_controls(&request, &doc).unwrap();
+    assert_eq!(rows[0]["preprocessor"], "canny");
+    assert_eq!(rows[0]["resize_mode"], "pad");
+    assert_eq!(rows[0]["source_path"], json!(media));
+    assert_eq!(rows[0]["mask_path"], json!(media));
+    assert_eq!(rows[0]["invert_mask"], true);
+    request["controls"][0]["mask_path"] = json!(null);
+    assert!(compiler_h3_controls(&request, &doc).unwrap_err().contains("together"));
+    request["controls"][0]["mask_path"] = json!(media);
+    request["controls"][0]["canny_low"] = json!(151);
+    assert!(compiler_h3_controls(&request, &doc).unwrap_err().contains("low < high"));
+    request["controls"][0]["canny_low"] = json!(50.5);
+    assert!(compiler_h3_controls(&request, &doc).unwrap_err().contains("integer"));
+    std::fs::remove_file(media).unwrap();
+}
+
+#[test]
+fn compiler_h3_controlnet_preserves_source_request_contract() {
+    // Serenity Mojo video/minimax_h3.rs:1732-1771 keeps the selected official
+    // checkpoint and excludes LoRA overlays for the dedicated ControlNet task.
+    let media = std::env::temp_dir().join(format!("difc-control-contract-{}.png", std::process::id()));
+    std::fs::write(&media, b"request parsing only").unwrap();
+    let mut request = json!({
+        "task":"controlnet", "prompt":"Keep the source request unchanged.",
+        "controlnet":MINIMAX_H3_CONTROLNET_NAME,
+        "width":768, "height":768, "frames":120, "fps":24,
+        "steps":20, "seed":9003, "quant":"int8", "attention_backend":"ck-int8",
+        "step_cache":"exact", "controls":[{"path":media,"strength":0}]
+    });
+    validate_minimax_h3_request(&request).unwrap();
+    request["controlnet"] = json!("another-checkpoint.safetensors");
+    assert!(validate_minimax_h3_request(&request).unwrap_err().contains("installed official"));
+    request["controlnet"] = json!(MINIMAX_H3_CONTROLNET_NAME);
+    request["loras"] = json!([{"name":"adapter.safetensors","strength":1}]);
+    assert!(validate_minimax_h3_request(&request).unwrap_err().contains("without LoRA"));
+    request["loras"] = json!([]);
+    request["step_cache"] = json!("high");
+    assert!(validate_minimax_h3_request(&request).unwrap_err().contains("exact"));
+    request["step_cache"] = json!("exact");
+
+    // Source lines 771-788 accept every finite strength; the former compiler
+    // limit of 10 was an extra constraint absent from the working Mojo path.
+    let mut doc = difc_config::current().unwrap().clone();
+    for key in ["checkpoint", "stage_script", "media_program", "ffmpeg", "ffprobe", "encoder_source_bundle"] {
+        doc["minimax_h3"]["control"][key] = json!(media);
+    }
+    doc["minimax_h3"]["control"].as_object_mut().unwrap().remove("max_abs_strength");
+    for strength in [-11.0, 11.0] {
+        request["controls"][0]["strength"] = json!(strength);
+        let controls = compiler_h3_controls(&request, &doc).unwrap();
+        assert_eq!(controls[0]["strength"], strength);
+    }
+    std::fs::remove_file(media).unwrap();
 }

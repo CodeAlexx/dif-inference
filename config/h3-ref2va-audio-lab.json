@@ -1,0 +1,9 @@
+{
+  "extends": "difc.json",
+  "memory_max": "4G",
+  "memory_swap_max": "0",
+  "desktop_reserve": "20G",
+  "server": {
+    "output_dir": "${repo}/output/ref2va-audio-lab"
+  }
+}

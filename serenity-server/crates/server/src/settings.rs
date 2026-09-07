@@ -7,7 +7,7 @@
 //!   GET  /stagehand_settings            — offload knobs blob
 //!   POST /stagehand_settings {...}      — persist offload knobs blob
 //!   POST /video_edit/resolve_view_path  — {filename,subfolder,type} → {path} (mirrors /view)
-//!   GET  /output_files                  — files directly under out_dir (name/size/mtime)
+//!   GET  /output_files                  — recent generated media, including job subdirs
 //!   DELETE /output_files/{name}         — delete one output file (guarded)
 //!   POST /open_output_dir               — {path} of the output dir (no shelling)
 //!
@@ -293,18 +293,30 @@ pub async fn get_resolve_view_path(
 
 // ── /output_files ────────────────────────────────────────────────────────────────
 
-/// GET /output_files — files DIRECTLY under out_dir (skips subdirs + dotfiles).
-/// BARE ARRAY of `{name, size_bytes, modified}` (mtime seconds); the frontend reads
-/// `files.length`, `f.name`, `f.size_bytes`, `f.modified`.
+/// GET /output_files — SerenityFlow's recent-media listing, including job subdirs.
+/// BARE ARRAY of `{name, subfolder, size_bytes, modified, type}`, newest 500 first.
 pub async fn get_output_files(State(st): State<AppState>) -> Response {
     let out = st.out_dir.as_path();
     let mut files: Vec<Value> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(out) {
+    let mut directories = vec![out.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        let Ok(rd) = std::fs::read_dir(directory) else { continue };
         for ent in rd.flatten() {
-            let name = ent.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            let path = ent.path();
+            if ent.file_type().is_ok_and(|kind| kind.is_dir()) {
+                directories.push(path);
                 continue;
             }
+            let extension = path.extension().and_then(|ext| ext.to_str())
+                .unwrap_or("").to_ascii_lowercase();
+            let media_type = match extension.as_str() {
+                "mp4" | "mov" | "mkv" | "webm" => "video",
+                "png" | "jpg" | "jpeg" | "webp" => "image",
+                _ => continue,
+            };
+            let Ok(relative) = path.strip_prefix(out) else { continue };
+            let name = ent.file_name().to_string_lossy().into_owned();
+            let subfolder = relative.parent().unwrap_or_else(|| Path::new(""));
             let meta = match ent.metadata() {
                 Ok(m) if m.is_file() => m,
                 _ => continue,
@@ -317,8 +329,10 @@ pub async fn get_output_files(State(st): State<AppState>) -> Response {
                 .unwrap_or(0);
             files.push(json!({
                 "name": name,
+                "subfolder": subfolder.to_string_lossy(),
                 "size_bytes": meta.len(),
                 "modified": modified,
+                "type": media_type,
             }));
         }
     }
@@ -329,6 +343,7 @@ pub async fn get_output_files(State(st): State<AppState>) -> Response {
             .unwrap_or(0)
             .cmp(&a["modified"].as_u64().unwrap_or(0))
     });
+    files.truncate(500);
     json_ok(&Value::Array(files))
 }
 

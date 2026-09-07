@@ -12,3 +12,4 @@ serenity-server/target/
 *.rgb
 *.mp4
 *.db
+__pycache__/

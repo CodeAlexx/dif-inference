@@ -226,9 +226,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "difc-config"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "difc-worker"
 version = "0.0.1"
 dependencies = [
+ "difc-config",
  "libc",
  "serde",
  "serde_json",
@@ -947,6 +955,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum",
+ "difc-config",
  "genesis-web",
  "httpdate",
  "image",

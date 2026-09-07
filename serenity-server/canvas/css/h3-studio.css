@@ -1,5 +1,12 @@
 /* MiniMax H3 Studio — project-based filmmaker workspace. */
-#panel-h3-studio {
+.h3s-ref-preview { display: block; width: 100%; max-height: 144px; object-fit: contain; border-radius: 4px; background: #0d1011; }
+audio.h3s-ref-preview { height: 36px; }
+.h3s-control-media { margin: 10px 0; }
+.h3s-control-preview { display: block; width: 100%; max-height: 144px; object-fit: contain; border-radius: 4px; background: #0d1011; margin-bottom: 8px; }
+.h3s-control-upload { display: flex; flex-wrap: wrap; gap: 6px; }
+.h3s-control-upload input { max-width: 100%; min-width: 0; font-size: 11px; }
+.h3s-control-inpaint > summary { cursor: pointer; margin: 10px 0; }
+#panel-h3-studio, #gen-h3-references {
     --h3-ink: #e9e5dc;
     --h3-muted: #96978f;
     --h3-dim: #686b67;
@@ -234,7 +241,8 @@
 .h3s-warning { padding: 8px 9px; border: 1px solid rgba(232,168,76,.35); background: var(--h3-amber-soft); color: #d7bc91; font-size: 9.5px; line-height: 1.45; border-radius: 4px; }
 .h3s-error { border-color: rgba(210,107,94,.45); background: rgba(210,107,94,.1); color: #e2a098; }
 
-.h3s-ref-list, .h3s-asset-list { display: grid; gap: 6px; margin-top: 8px; }
+.h3s-ref-list, .h3s-asset-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+.h3s-ref { min-width: 0; }
 .h3s-ref, .h3s-asset {
     padding: 8px; border: 1px solid var(--h3-line); border-radius: 4px; background: #101415;
 }

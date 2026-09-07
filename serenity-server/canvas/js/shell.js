@@ -121,6 +121,9 @@ function switchTab(tabId) {
     if (tabId === 'h3-studio' && typeof H3StudioTab !== 'undefined') {
         H3StudioTab.init();
     }
+    if (tabId === 'h3-ct' && typeof H3ControlTab !== 'undefined') {
+        H3ControlTab.init();
+    }
     // Resize Konva stage when workflows tab becomes visible
     if (tabId === 'workflows') {
         requestAnimationFrame(function () {

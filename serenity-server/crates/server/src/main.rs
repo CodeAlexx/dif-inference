@@ -561,6 +561,34 @@ fn local_artifact_manifest(
     model: &str,
     selected_checkpoint: &str,
 ) -> Option<LocalArtifactManifest> {
+    if let Some((key, profile)) = difc_config::image_profile(model) {
+        let doc = difc_config::current().ok()?;
+        let mut specs = Vec::new();
+        for entry in profile["artifacts"].as_array()? {
+            let source_key = entry["path_key"].as_str()?;
+            let path = match difc_config::string(doc, source_key) {
+                Ok(root) => {
+                    let suffix = entry["suffix"].as_str().unwrap_or("");
+                    if suffix.is_empty() {
+                        root.to_string()
+                    } else {
+                        PathBuf::from(root).join(suffix).to_string_lossy().into_owned()
+                    }
+                },
+                Err(e) => format!("CONFIGURATION ERROR: {e}"),
+            };
+            specs.push(ArtifactSpec {
+                label: entry["label"].as_str()?.to_string(), path,
+                kind: if entry["kind"] == "directory" { ArtifactKind::Directory } else { ArtifactKind::File },
+            });
+        }
+        specs.push(artifact_file("native compiler entry", profile["production_entry"].as_str()?));
+        return Some(LocalArtifactManifest {
+            profile: key, family: profile["family"].as_str()?,
+            root: difc_config::string(doc, "server.model_root").ok()?.to_string(),
+            production_entry: profile["production_entry"].as_str()?, specs,
+        });
+    }
     let m = model.trim().to_ascii_lowercase();
     let selected_family = capabilities::model_family(model).ok();
 
@@ -1294,8 +1322,43 @@ fn validate_generate_runtime_ready(
 ) -> Result<ModelFamily, String> {
     let family = model_family(&params.model)?;
     capabilities::compiler_serves(family, &params.model)?;
+    if matches!(family, ModelFamily::Flux2 | ModelFamily::Sdxl) {
+        if family == ModelFamily::Flux2 && has_text(&params.negative) {
+            return Err("negative prompt is not supported by the compiler FLUX.2 chain".into());
+        }
+        for (name, value) in [
+            ("init_image", &params.init_image),
+            ("reference_image", &params.reference_image), ("mask_image", &params.mask_image),
+            ("edit_src_image", &params.edit_src_image),
+            ("inpaint_conditioning_image", &params.inpaint_conditioning_image),
+            ("qwen_edit_conditioning_image", &params.qwen_edit_conditioning_image),
+        ] {
+            if has_text(value) {
+                return Err(format!("{name} is not supported by this compiler text-to-image chain"));
+            }
+        }
+        if !params.loras.is_empty() {
+            return Err("LoRA is not supported by this compiler text-to-image chain".into());
+        }
+    }
     if !has_text(&params.prompt) {
         return Err("prompt is required".to_string());
+    }
+    if family == ModelFamily::Sdxl {
+        if requested_sampler(params, family) != "euler" || requested_scheduler(params, family) != "normal" {
+            return Err("SDXL compiler chain supports Euler with the normal discrete DDPM schedule only".into());
+        }
+        if params.steps < 1 || params.steps > i64::from(u32::MAX) || !params.cfg.is_finite() || params.cfg < 0.0 {
+            return Err("SDXL requires positive uint32 steps and finite nonnegative CFG".into());
+        }
+        if params.width <= 0 || params.height <= 0 || params.width % 8 != 0 || params.height % 8 != 0 {
+            return Err("SDXL dimensions must be positive multiples of eight".into());
+        }
+        if has_text(&params.vae) || params.clip_skip != 0 || params.eta != -1.0 ||
+            params.sigma_min != -1.0 || params.sigma_max != -1.0 || params.restart_sampling ||
+            params.variation_strength != 0.0 || params.cfg_override != -1.0 {
+            return Err("SDXL compiler chain does not support VAE overrides, clip_skip, custom sigmas, eta, restart sampling, variation noise or CFG overrides".into());
+        }
     }
     Ok(family)
 }
@@ -1788,9 +1851,10 @@ fn default_out_dir() -> PathBuf {
 /// The legacy monolith entry `serenity_daemon worker <kind> <fd>` is still
 /// available with `--daemon-worker-kind <kind>`.
 fn parse_args() -> CliConfig {
-    let mut worker = repository_root_path().join("output/bin/serenity_worker_stub");
-    let mut port: u16 = 7801;
-    let mut out_dir = default_out_dir();
+    let doc = difc_config::current().expect("deployment JSON validated before CLI parsing");
+    let mut worker = PathBuf::from(difc_config::string(doc, "server.worker").expect("configured worker"));
+    let mut port: u16 = doc["server"]["port"].as_u64().expect("configured port") as u16;
+    let mut out_dir = PathBuf::from(difc_config::string(doc, "server.output_dir").expect("configured output_dir"));
     let mut kind: Option<String> = None;
     let mut daemon_worker_kind: Option<String> = None;
 
@@ -4731,13 +4795,48 @@ mod endpoint_tests {
     }
 
     #[test]
+    fn sdxl_preflight_and_sampler_catalog_match_native_worker_contract() {
+        let req: GenerateRequest = serde_json::from_value(json!({
+            "model": "sd_xl_base_1.0", "prompt": "a blue teapot", "negative": "blurry"
+        })).unwrap();
+        let (mut params, hires_scale, _) = params_from_generate_request(req, "preflight", "/tmp/out");
+        assert_eq!(generate_preflight_report(&params, hires_scale)["admitted"], true);
+        params.scheduler = "karras".into();
+        assert!(validate_generate_runtime_ready(&params, hires_scale).unwrap_err().contains("normal"));
+        params.scheduler = "normal".into(); params.sampler = "ddim".into();
+        assert!(validate_generate_runtime_ready(&params, hires_scale).is_err());
+        params.sampler = "euler".into(); params.clip_skip = 1;
+        assert!(validate_generate_runtime_ready(&params, hires_scale).is_err());
+        let catalog: JsonValue = serde_json::from_str(SAMPLERS_V1).unwrap();
+        let sdxl = catalog["backends"].as_array().unwrap().iter().find(|x| x["backend"] == "sdxl").unwrap();
+        let profile = capabilities::capability_profile_for_model("sd_xl_base_1.0");
+        assert_eq!(sdxl["supported_samplers"], profile["samplers"]["supported_samplers"]);
+        assert_eq!(sdxl["supported_schedulers"], profile["samplers"]["supported_schedulers"]);
+    }
+
+    #[test]
+    fn configured_sdxl_artifacts_use_full_checkpoint_and_native_entry() {
+        let doc = difc_config::current().expect("valid deployment config");
+        let profile = &doc["image_profiles"]["sdxl"];
+        let identity = profile["aliases"][0].as_str().unwrap();
+        let manifest = local_artifact_manifest(identity, "").expect("configured SDXL artifacts");
+        assert_eq!(manifest.production_entry, profile["production_entry"].as_str().unwrap());
+        assert_eq!(manifest.specs.len(), profile["artifacts"].as_array().unwrap().len() + 1);
+        assert!(manifest.specs.iter().any(|spec|
+            spec.path == difc_config::string(doc, "sdxl.checkpoint").unwrap()));
+        assert!(manifest.specs.iter().all(|spec| !spec.path.contains("serenitymojo/")));
+        assert!(!manifest.specs.iter().any(|spec|
+            spec.path.ends_with("clip_l.safetensors") || spec.path.ends_with("clip_g.safetensors")));
+    }
+
+    #[test]
     fn worker_dispatch_uses_admitted_model_family_classifier() {
         let current = PathBuf::from("/tmp/serenity-bin/serenity_worker_zimage");
         let cases = [
             ("zimage", "zimage", "serenity_worker_zimage"),
             ("ideogram4", "ideogram4", "serenity_worker_ideogram4"),
-            ("sdxl", "sdxl", "serenity_worker_sdxl"),
-            ("sd_xl_base_1.0", "sdxl", "serenity_worker_sdxl"),
+            ("sdxl", "sdxl", "serenity_worker_difc"),
+            ("sd_xl_base_1.0", "sdxl", "serenity_worker_difc"),
             ("anima", "anima", "serenity_worker_anima"),
             ("sd3.5-large", "sd3", "serenity_worker_sd3"),
             ("klein-9b", "flux2", "serenity_worker_difc"),
@@ -5156,7 +5255,7 @@ mod endpoint_tests {
         );
         assert_eq!(
             report["capability_profile"]["features"]["lora"]["supported"],
-            true
+            false
         );
         assert_eq!(report["block_profile"]["profile"], "klein9b_flux2_dit");
         assert_eq!(report["block_profile"]["block_count"], 32);
@@ -5337,7 +5436,7 @@ mod endpoint_tests {
             "chroma",
         ] {
             let entry = backend(name);
-            let expected = if name == "flux2" || name == "krea2" { "admitted" } else { "not_ported" };
+            let expected = if matches!(name, "flux2" | "krea2" | "sdxl") { "admitted" } else { "not_ported" };
             assert_eq!(entry["production_status"], expected, "{name}");
             assert_eq!(entry["engine"], "diffusion-compiler");
             assert_eq!(entry["features"]["text_to_image"]["supported"], true);
@@ -5395,12 +5494,10 @@ mod endpoint_tests {
             "zimage",
             "qwenimage",
             "ideogram4",
-            "sdxl",
             "anima",
             "sd3",
             "chroma",
             "flux",
-            "flux2",
             "krea2",
         ] {
             assert_eq!(
@@ -5443,6 +5540,13 @@ mod endpoint_tests {
             }
         }
 
+        let sdxl = backend("sdxl");
+        assert_eq!(sdxl["worker_binary"], "serenity_worker_difc");
+        assert_eq!(sdxl["features"]["negative_prompt"]["supported"], true);
+        assert_eq!(sdxl["features"]["lora"]["supported"], false);
+        assert_eq!(sdxl["samplers"]["supported_samplers"], json!(["euler"]));
+        assert_eq!(sdxl["samplers"]["supported_schedulers"], json!(["normal"]));
+
         let flux2 = backend("flux2");
         assert_eq!(flux2["worker_binary"], "serenity_worker_difc");
         assert_eq!(flux2["defaults"]["width"], 1024);
@@ -5460,7 +5564,7 @@ mod endpoint_tests {
                 .iter()
                 .any(|shape| shape["width"] == 512 && shape["height"] == 512)
         );
-        assert_eq!(flux2["features"]["lora"]["max_count"], 1);
+        assert_eq!(flux2["features"]["lora"]["supported"], false);
         assert_eq!(flux2["features"]["negative_prompt"]["supported"], false);
 
         let sensenova = backend("sensenova");
@@ -5723,6 +5827,10 @@ mod endpoint_tests {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+    let deployment = difc_config::current().map_err(anyhow::Error::msg)?;
+    std::env::set_var("SERENITY_REPO_ROOT", difc_config::repository_root());
+    std::env::set_var("SERENITY_MODEL_ROOT", difc_config::string(deployment, "server.model_root").map_err(anyhow::Error::msg)?);
+    std::env::set_var("SERENITY_OUT_DIR", difc_config::string(deployment, "server.output_dir").map_err(anyhow::Error::msg)?);
 
     // 1. CLI.
     let cli = parse_args();

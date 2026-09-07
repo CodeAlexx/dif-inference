@@ -3,7 +3,7 @@
 Status: binding for production changes under `serenity-server/canvas/`.
 
 The canvas is the checked-in Serenity Studio browser client. Changes preserve
-the existing Rust control-plane API, Mojo inference backends, workflow graph
+the existing Rust control-plane API, compiler inference backends, workflow graph
 schema, workflow builders, templates, model identifiers, and saved-workflow
 compatibility unless a separately reviewed contract migration changes them.
 

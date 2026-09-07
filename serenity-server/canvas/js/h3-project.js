@@ -92,6 +92,8 @@ var H3ProjectContracts = (function () {
             continue_from: '',
             motion_context_frames: 22,
             references: [],
+            lora: [],
+            controls: [],
             take_job_ids: [],
             take_states: [],
             take_output_paths: [],
@@ -378,6 +380,8 @@ var H3ProjectContracts = (function () {
     }
 
     function endlessBaseSnapshot(shot, targetSeconds, segmentSeconds, direction) {
+        var features = featureIssue(shot);
+        if (features) throw new Error(features);
         var issue = validateEndlessSettings(targetSeconds, segmentSeconds, direction);
         if (issue) throw new Error(issue);
         var frames = planEndlessFrames(targetSeconds, segmentSeconds);
@@ -394,6 +398,10 @@ var H3ProjectContracts = (function () {
             continue_from: String(shot.continue_from || ''), motion_context_frames: Number(shot.motion_context_frames) || 22,
             references: Array.isArray(shot.references) ? shot.references.map(copy) : []
         };
+        // Omit empty additions to preserve existing saved endless fingerprints.
+        // Nonempty feature stacks are inference inputs and must be immutable.
+        if (shot.lora && shot.lora.length) base.lora = copy(shot.lora);
+        if (shot.controls && shot.controls.length) base.controls = copy(shot.controls);
         var first = Object.assign(createShot(base.id, base.title), copy(base));
         first.duration_seconds = durations[0];
         var shotIssue = validateShot(first);
@@ -664,7 +672,92 @@ var H3ProjectContracts = (function () {
         return '';
     }
 
+    var CONTROL_FIELDS = ['path', 'preprocessor', 'resize_mode', 'canny_low', 'canny_high', 'strength', 'start', 'end', 'source_path', 'mask_path', 'invert_mask'];
+
+    function createControl(path, policy) {
+        return Object.assign({ preprocessor: 'prepared', resize_mode: 'crop', canny_low: 100, canny_high: 200,
+            strength: 1, start: 0, end: 1, invert_mask: false }, copy(policy && policy.defaults || {}), { path: path || '' });
+    }
+
+    // Upload previews belong to the project, never the strict native API schema.
+    function controlRequest(row) {
+        var result = {};
+        CONTROL_FIELDS.forEach(function (key) {
+            if (row[key] !== undefined && !(['source_path', 'mask_path'].indexOf(key) >= 0 && row[key] === '')) result[key] = copy(row[key]);
+        });
+        return result;
+    }
+
+    function setControlMedia(row, field, data, file) {
+        row[field] = data.path || '';
+        if (!row._media) row._media = {};
+        row._media[field] = { path: row[field], url: data.url || '', thumbnail_url: data.thumbnail_url || '',
+            kind: String(file && file.type || '').split('/')[0], name: file && file.name || '' };
+    }
+
+    function featureIssue(shot, features) {
+        var loras = shot.lora === undefined ? [] : shot.lora;
+        var controls = shot.controls === undefined ? [] : shot.controls;
+        if (!Array.isArray(loras) || !Array.isArray(controls)) return 'LoRAs and controls must be ordered arrays.';
+        for (var i = 0; i < loras.length; i++) {
+            var lora = loras[i];
+            if (!lora || typeof lora !== 'object' || Array.isArray(lora)) return 'Each LoRA must be an object.';
+            if (Object.keys(lora).some(function (key) { return ['name', 'path', 'weight'].indexOf(key) < 0; }))
+                return 'LoRAs accept a name or path and weight; unsupported fields cannot be ignored.';
+            var hasName = typeof lora.name === 'string' && lora.name.trim() !== '';
+            var hasPath = typeof lora.path === 'string' && lora.path.trim() !== '';
+            if (hasName === hasPath || (lora.name !== undefined && !hasName) || (lora.path !== undefined && !hasPath))
+                return 'Each LoRA needs exactly one installed name or server path.';
+            if (lora.weight !== undefined && (typeof lora.weight !== 'number' || !Number.isFinite(lora.weight)))
+                return 'LoRA weights must be finite numbers.';
+        }
+        for (var j = 0; j < controls.length; j++) {
+            var row = controls[j];
+            if (!row || typeof row !== 'object' || Array.isArray(row)) return 'Each control must be an object.';
+            if (Object.keys(row).some(function (key) { return CONTROL_FIELDS.indexOf(key) < 0 && key !== '_media'; }))
+                return 'Unsupported control field; use source_path/mask_path for paired inpainting media.';
+            if (typeof row.path !== 'string' || !row.path.trim()) return 'Each control needs a server-uploaded guide image or video path.';
+            var preprocessor = row.preprocessor === undefined ? 'prepared' : row.preprocessor;
+            var resize = row.resize_mode === undefined ? 'crop' : row.resize_mode;
+            if (['prepared', 'canny'].indexOf(preprocessor) < 0) return 'Control preprocessor must be prepared or canny.';
+            if (['crop', 'pad', 'stretch'].indexOf(resize) < 0) return 'Control resize mode must be crop, pad or stretch.';
+            var controlPolicy = features && features.controlnet;
+            if (controlPolicy && Array.isArray(controlPolicy.preprocessors) && controlPolicy.preprocessors.indexOf(preprocessor) < 0) return 'Control preprocessor is unavailable in this deployment.';
+            if (controlPolicy && Array.isArray(controlPolicy.resize_modes) && controlPolicy.resize_modes.indexOf(resize) < 0) return 'Control resize mode is unavailable in this deployment.';
+            for (var key of ['strength', 'start', 'end', 'canny_low', 'canny_high']) {
+                if (row[key] !== undefined && (typeof row[key] !== 'number' || !Number.isFinite(row[key]))) return 'Control ' + key + ' must be a finite number.';
+            }
+            var low = row.canny_low === undefined ? 100 : row.canny_low;
+            var high = row.canny_high === undefined ? 200 : row.canny_high;
+            if (!Number.isInteger(low) || !Number.isInteger(high) || low < 0 || low >= high || high > 255) return 'Canny thresholds must satisfy 0 ≤ low < high ≤ 255 (whole numbers).';
+            for (var field of ['source_path', 'mask_path']) {
+                if (row[field] !== undefined && typeof row[field] !== 'string') return 'Inpainting source and mask paths must be strings.';
+            }
+            if (!!String(row.source_path || '').trim() !== !!String(row.mask_path || '').trim()) return 'Inpainting needs both source_path and mask_path.';
+            if (row.invert_mask !== undefined && typeof row.invert_mask !== 'boolean') return 'Invert mask must be a boolean.';
+            var start = row.start === undefined ? 0 : row.start;
+            var end = row.end === undefined ? 1 : row.end;
+            if (start < 0 || end > 1 || start > end) return 'Control schedule must satisfy 0 ≤ start ≤ end ≤ 1 (data-ward timestep).';
+        }
+        if (controls.length > 4) return 'H3 supports at most 4 ordered control guides.';
+        if (controls.length && (detectMode(shot) !== 't2va')) return 'ControlNet supports T2VA only; remove keyframes, references and continuation or remove controls.';
+        if (controls.length && shot.step_cache && shot.step_cache !== 'exact') return 'ControlNet requires exact denoise steps; residual-cache invalidation is not implemented.';
+        if (features !== undefined) {
+            for (var spec of [['lora', loras, 'weight', 'max_abs_scale'], ['controlnet', controls, 'strength', 'max_abs_strength']]) {
+                if (!spec[1].length) continue;
+                var policy = features && features[spec[0]];
+                if (!policy || policy.available !== true) return spec[0] + ' is unavailable in the current native runner.';
+                if (!Number.isInteger(policy.max_count) || (spec[0] === 'lora' && (!Number.isFinite(policy[spec[3]]) || policy[spec[3]] <= 0))) return 'Missing native ' + spec[0] + ' admission policy.';
+                if (spec[1].length > policy.max_count) return 'Too many ' + spec[0] + ' entries for the configured policy (' + policy.max_count + ').';
+                if (spec[0] === 'lora' && spec[1].some(function (entry) { return Math.abs(entry[spec[2]] === undefined ? 1 : entry[spec[2]]) > policy[spec[3]]; })) return spec[0] + ' strength exceeds the configured policy.';
+            }
+        }
+        return '';
+    }
+
     function validateShot(shot) {
+        var features = featureIssue(shot);
+        if (features) return features;
         var seconds = Number(shot.duration_seconds);
         if (seconds < MIN_SECONDS || seconds > MAX_SECONDS) return 'Shot duration must stay between 5 and 15 seconds.';
         if (shot.width < 32 || shot.height < 32 || shot.width % 32 || shot.height % 32) return 'Shot dimensions must be positive multiples of 32.';
@@ -714,6 +807,8 @@ var H3ProjectContracts = (function () {
             request.trim_start_frames = request.motion_context_frames;
         }
         if (shot.references.length) request.references = shot.references.map(copy);
+        if (shot.lora && shot.lora.length) request.lora = shot.lora.map(copy);
+        if (shot.controls && shot.controls.length) request.controls = shot.controls.map(controlRequest);
         return request;
     }
 
@@ -983,6 +1078,10 @@ var H3ProjectContracts = (function () {
         compilePrompt: compilePrompt,
         promptComplianceIssue: promptComplianceIssue,
         validateShot: validateShot,
+        featureIssue: featureIssue,
+        createControl: createControl,
+        controlRequest: controlRequest,
+        setControlMedia: setControlMedia,
         renderRequest: renderRequest,
         validateEndlessSettings: validateEndlessSettings,
         planEndlessDurations: planEndlessDurations,

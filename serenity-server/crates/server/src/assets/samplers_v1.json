@@ -144,23 +144,17 @@
       "backend": "sdxl",
       "model_family": "sdxl",
       "accepted_sampler_parity": false,
-      "executed_sampler": "sdxl_euler_or_dpmpp_2m",
-      "executed_scheduler": "sdxl_swarmui_schedule",
+      "executed_sampler": "sdxl_compiler_euler",
+      "executed_scheduler": "normal",
       "supported_samplers": [
-        "euler",
-        "ddim",
-        "dpmpp_2m"
+        "euler"
       ],
       "supported_schedulers": [
-        "normal",
-        "karras",
-        "exponential",
-        "simple",
-        "ddim_uniform"
+        "normal"
       ],
       "blocked_samplers": [],
       "unsupported_policy": "fail_loud",
-      "reason": "SDXL executes Comfy Euler/DDIM-alias and DPM++ 2M over normal, Karras, exponential, simple, or DDIM-uniform schedules. torchref LoRAs compose separately; remaining Swarm algorithms stay fail-loud until their distinct denoise loops are implemented and proven."
+      "reason": "This deployment invokes native difsdxlsample with Euler and the normal discrete DDPM schedule. Negative prompts and CFG are supported; other samplers, schedules and LoRA are refused."
     },
     {
       "backend": "anima",

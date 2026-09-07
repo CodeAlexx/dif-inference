@@ -5,7 +5,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/wire", "crates/ipc", "crates/graph", "crates/server",
-    "crates/difc-worker"]
+    "crates/difc-worker", "crates/difc-config"]
 
 [workspace.package]
 edition = "2021"
