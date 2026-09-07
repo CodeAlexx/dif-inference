@@ -35,6 +35,32 @@ INT8_ROUTE="$(jq_get minimax_h3.int8_route)"
 CACHE="$(jq_get minimax_h3.cache_dir)"
 RESIDENT_LAYERS_DEFAULT="$(jq_get minimax_h3.resident_layers)"
 
+# A run streams the whole denoiser trunk from disk on every evaluation (~69 GB
+# of h2d traffic here), and those clean pages stay in the page cache afterwards.
+# A few consecutive renders then leave the host at ~3 GB free out of 62 GB, and
+# the runtime guard cancels the NEXT job on PSI full-memory stalls even though
+# the child itself peaks under 5 GB — that killed three H3 renders on
+# 2026-09-06. Hand the pages back on every exit path, success or failure, so the
+# pressure does not accumulate across jobs. Advisory only: nothing is written,
+# nothing still mapped is taken, and a streamed runtime cold-reads regardless.
+release_streamed_pages() {
+  local paths=()
+  local key
+  for key in minimax_h3.checkpoint minimax_h3.convrot_int8 minimax_h3.w8a8_cache \
+             minimax_h3.modulation_cache minimax_h3.control.checkpoint; do
+    local value
+    value="$(jq_get "$key" 2>/dev/null)" || continue
+    [[ -n "$value" && -e "$value" ]] && paths+=("$value")
+  done
+  (( ${#paths[@]} )) || return 0
+  # log() is defined further down, and this trap also fires on the early
+  # validation exits above it, so emit the runner's prefix directly.
+  python3 "$(dirname "${BASH_SOURCE[0]}")/release_streamed_pages.py" "${paths[@]}" 2>&1 \
+    | while IFS= read -r line; do echo "[difc-h3] ${line#\[page-cache\] }"; done || true
+}
+trap release_streamed_pages EXIT
+
+
 # Preparation is explicit and uses native compiler tools. Never claim an old
 # Mojo resident-cache build has prepared the native modulation cache.
 for a in "$@"; do
