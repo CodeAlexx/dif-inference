@@ -321,3 +321,12 @@ audio.h3s-ref-preview { height: 36px; }
 @media (prefers-reduced-motion: reduce) {
     #panel-h3-studio *, #panel-h3-studio *::before, #panel-h3-studio *::after { transition: none !important; animation: none !important; }
 }
+
+/* Cast editor — ported from the Mojo reference so the identity lock has UI. */
+.h3s-cast { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.h3s-cast-empty { padding: 14px; border: 1px dashed rgba(255,255,255,.18); border-radius: 8px; color: rgba(255,255,255,.55); font-size: 12px; text-align: center; }
+.h3s-cast-card { display: flex; gap: 10px; padding: 10px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.03); }
+.h3s-cast-thumb { width: 72px; height: 72px; flex: 0 0 72px; border-radius: 8px; object-fit: cover; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.12); }
+.h3s-cast-thumb.is-empty { display: flex; align-items: center; justify-content: center; font-size: 10px; color: rgba(255,255,255,.4); text-align: center; }
+.h3s-cast-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.h3s-cast-actions { display: flex; gap: 6px; }

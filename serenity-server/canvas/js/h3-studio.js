@@ -156,26 +156,65 @@ var H3StudioTab = (function () {
             '<label class="h3s-check"><input type="checkbox" data-project-field="adult_mode"' + checked(state.project.adult_mode) + '><span>Lawful consensual adult 18+ captioning. Never minors, coercion, or exploitative non-consent.</span></label></div>';
     }
 
+    function addCharacter() {
+        if (!Array.isArray(state.project.characters)) state.project.characters = [];
+        if (!state.project.next_character_id) state.project.next_character_id = 1;
+        state.project.characters.push({ id: state.project.next_character_id++, name: '', ref_path: '', ref_url: '', appearance: '' });
+        state.bibleTab = 'cast'; saveProject('Character added'); render();
+    }
+    function uploadCastImage(index, file) {
+        if (!file) return;
+        setStatus('Uploading portrait…', 'live');
+        SerenityAPI.uploadMediaDetails(file).then(function (data) {
+            var c = (state.project.characters || [])[index];
+            if (c) { c.ref_path = data.path || data.name || ''; c.ref_url = data.url || data.path || ''; }
+            saveProject('Portrait set'); setStatus('Portrait set', ''); render();
+        }).catch(function (error) { setStatus('Portrait upload failed: ' + error.message, 'error'); });
+    }
+
     function biblesHtml() {
         var tabs = [
-            ['director_brief', 'Director'], ['continuity_bible', 'Continuity'], ['brand_bible', 'Brand']
+            ['director_brief', 'Director'], ['continuity_bible', 'Continuity'], ['cast', 'Cast'], ['brand_bible', 'Brand']
         ];
         var placeholder = state.bibleTab === 'director_brief'
             ? 'Movie outline, script, commercial brief, dialogue, or general story intent…'
             : (state.bibleTab === 'continuity_bible'
                 ? 'Identity, wardrobe, props, location, lighting, eyeline, screen direction, motion, dialogue and sound state…'
                 : 'Product, logo, visual language, claims, colors, typography, audience and mandatory brand beats…');
+        var body = state.bibleTab === 'cast'
+            ? castEditorHtml()
+            : '<label class="h3s-field" style="margin-top:8px"><textarea class="h3s-textarea" data-project-field="' + state.bibleTab + '" placeholder="' + attr(placeholder) + '">' + escapeHtml(state.project[state.bibleTab] || '') + '</textarea></label>';
         return '<div class="h3s-section"><div class="h3s-section-head"><span class="h3s-kicker">Project bibles</span><span class="h3s-count">AUTOSAVED</span></div>' +
             '<div class="h3s-bible-tabs">' + tabs.map(function (tab) {
                 return '<button class="h3s-tab ' + (state.bibleTab === tab[0] ? 'is-active' : '') + '" data-bible-tab="' + tab[0] + '">' + tab[1] + '</button>';
-            }).join('') + '</div>' +
-            '<label class="h3s-field" style="margin-top:8px"><textarea class="h3s-textarea" data-project-field="' + state.bibleTab + '" placeholder="' + attr(placeholder) + '">' + escapeHtml(state.project[state.bibleTab] || '') + '</textarea></label></div>';
+            }).join('') + '</div>' + body + '</div>';
+    }
+    function castEditorHtml() {
+        var chars = state.project.characters || [];
+        var cards = chars.map(function (c, i) {
+            var thumbSrc = String(c.ref_url || c.ref_path || '').trim();
+            var thumb = thumbSrc
+                ? '<img class="h3s-cast-thumb" src="' + attr(thumbSrc) + '" alt="' + attr(c.name) + '" onerror="this.style.opacity=0.2">'
+                : '<div class="h3s-cast-thumb is-empty">No image</div>';
+            return '<div class="h3s-cast-card">' + thumb +
+                '<div class="h3s-cast-body">' +
+                '<input class="h3s-input" data-cast-field="name" data-cast-index="' + i + '" value="' + attr(c.name) + '" placeholder="Character name (e.g. Marcus)">' +
+                '<textarea class="h3s-textarea is-cast" data-cast-field="appearance" data-cast-index="' + i + '" placeholder="Locked look: age, face, hair, skin tone, build, and the exact wardrobe worn across the whole film…">' + escapeHtml(c.appearance || '') + '</textarea>' +
+                '<div class="h3s-cast-actions"><button class="h3s-btn is-quiet" data-cast-image="' + i + '">' + (c.ref_path ? 'Replace portrait' : 'Set portrait') + '</button>' +
+                '<button class="h3s-btn is-quiet" data-cast-remove="' + i + '">Remove</button></div></div></div>';
+        }).join('');
+        return '<div class="h3s-cast">' +
+            '<div class="h3s-help" style="margin:8px 0">Every character here is auto-attached to every shot (same portrait + locked look), so faces and wardrobe stay identical across the movie. Locked shots keep their exact prompt.</div>' +
+            '<label class="h3s-check" style="margin:2px 0 6px"><input type="checkbox" data-project-field="cast_replaces_identities"' + checked(state.project.cast_replaces_identities !== false) + '><span>Cast is the only identity source — ignore each shot’s own per-shot people (removes the old drift). Turn off to also keep shot-specific guests.</span></label>' +
+            (cards || '<div class="h3s-cast-empty">No cast yet. Add the recurring people so they stop drifting between shots.</div>') +
+            '<button class="h3s-btn is-primary" data-h3-action="add-character" style="margin-top:8px">Add character</button>' +
+            '<input id="h3s-cast-image" type="file" accept="image/*" hidden></div>';
     }
 
     function shotListHtml() {
         return '<div class="h3s-section"><div class="h3s-section-head"><span class="h3s-kicker">Shot deck</span><span class="h3s-count">' + state.project.shots.length + '</span></div>' +
             '<div class="h3s-shot-list">' + state.project.shots.map(function (shot, index) {
-                var mode = C.detectMode(shot);
+                var mode = C.detectMode(shot, state.project);
                 return '<button class="h3s-shot-card ' + (shot.id === state.selectedShotId ? 'is-active' : '') + '" data-select-shot="' + shot.id + '">' +
                     '<span class="h3s-shot-number">' + String(index + 1).padStart(2, '0') + '</span><span><span class="h3s-shot-name">' + escapeHtml(shot.title) + '</span>' +
                     '<span class="h3s-shot-meta">' + escapeHtml(mode.toUpperCase()) + ' · ' + C.secondsText(shot.duration_seconds) + 's · ' + escapeHtml(shot.status) + '</span></span>' +
@@ -191,7 +230,7 @@ var H3StudioTab = (function () {
 
     function monitorHtml() {
         var shot = selectedShot();
-        var mode = C.detectMode(shot);
+        var mode = C.detectMode(shot, state.project);
         var take = shot.selected_take >= 0 ? shot.take_output_paths[shot.selected_take] : '';
         var src = take || shot.output_path || '';
         var content = src
@@ -216,8 +255,8 @@ var H3StudioTab = (function () {
 
     function promptStageHtml() {
         var shot = selectedShot();
-        var prompt = C.compilePrompt(shot);
-        var issue = C.promptComplianceIssue(prompt, C.detectMode(shot), shot.duration_seconds);
+        var prompt = C.compilePrompt(shot, state.project);
+        var issue = C.promptComplianceIssue(prompt, C.detectMode(shot, state.project), shot.duration_seconds);
         return '<div class="h3s-panel-head"><div><div class="h3s-kicker">Canonical H3 prompt</div><div class="h3s-stage-copy" style="margin:4px 0 0">Advanced override. Clear the override to compile from shot fields again.</div></div>' +
             '<button class="h3s-btn" data-h3-action="compile-prompt">Compile fields</button></div>' +
             (issue ? '<div class="h3s-warning h3s-error">' + escapeHtml(issue) + '</div>' : '<div class="h3s-warning" style="border-color:rgba(126,175,120,.35);background:rgba(126,175,120,.08);color:#a7c8a2">Prompt structure passes the local H3 contract.</div>') +
@@ -500,7 +539,7 @@ var H3StudioTab = (function () {
         state.project.shots.forEach(function (shot, index) {
             if (index) rows.push('<span class="h3s-spine-join"></span>');
             var start = cumulative; cumulative += Number(shot.duration_seconds || 0);
-            rows.push('<button class="h3s-spine-shot ' + (shot.id === state.selectedShotId ? 'is-active ' : '') + (shot.locked ? 'is-locked' : '') + '" data-select-shot="' + shot.id + '"><div class="h3s-spine-title">' + escapeHtml(shot.title) + '</div><div class="h3s-spine-meta">' + timecode(start) + ' → ' + timecode(cumulative) + '</div><div class="h3s-spine-meta">' + C.detectMode(shot).toUpperCase() + ' · ' + shot.take_job_ids.length + ' TAKE(S)</div></button>');
+            rows.push('<button class="h3s-spine-shot ' + (shot.id === state.selectedShotId ? 'is-active ' : '') + (shot.locked ? 'is-locked' : '') + '" data-select-shot="' + shot.id + '"><div class="h3s-spine-title">' + escapeHtml(shot.title) + '</div><div class="h3s-spine-meta">' + timecode(start) + ' → ' + timecode(cumulative) + '</div><div class="h3s-spine-meta">' + C.detectMode(shot, state.project).toUpperCase() + ' · ' + shot.take_job_ids.length + ' TAKE(S)</div></button>');
         });
         return '<section class="h3s-timeline"><div class="h3s-timeline-head"><span class="h3s-kicker">Continuity spine</span><span class="h3s-timecode">' + timecode(totalSeconds()) + ' · DELIVERY ' + state.project.delivery_fps + ' FPS</span></div><div class="h3s-spine">' + rows.join('') + '</div></section>';
     }
@@ -643,6 +682,16 @@ var H3StudioTab = (function () {
         }); });
         panel.querySelectorAll('[data-ref-remove]').forEach(function (node) { node.addEventListener('click', function () { if (baseShotMutationBlocked(selectedShot())) { showToast('The endless base references are immutable during the active run.', 'error'); return; } selectedShot().references.splice(Number(node.dataset.refRemove), 1); selectedShot().prompt_override = ''; saveProject(); render(); }); });
         panel.querySelectorAll('[data-asset-remove]').forEach(function (node) { node.addEventListener('click', function () { state.project.assets.splice(Number(node.dataset.assetRemove), 1); saveProject(); render(); }); });
+        panel.querySelectorAll('[data-cast-field]').forEach(function (node) {
+            node.addEventListener('input', function () {
+                var c = (state.project.characters || [])[Number(node.dataset.castIndex)];
+                if (c) { c[node.dataset.castField] = node.value; saveProject(); }
+            });
+        });
+        panel.querySelectorAll('[data-cast-remove]').forEach(function (node) { node.addEventListener('click', function () { (state.project.characters || []).splice(Number(node.dataset.castRemove), 1); saveProject(); render(); }); });
+        var castImageInput = document.getElementById('h3s-cast-image');
+        panel.querySelectorAll('[data-cast-image]').forEach(function (node) { node.addEventListener('click', function () { if (castImageInput) { castImageInput.dataset.castIndex = node.dataset.castImage; castImageInput.click(); } }); });
+        if (castImageInput) castImageInput.addEventListener('change', function () { uploadCastImage(Number(castImageInput.dataset.castIndex), castImageInput.files[0]); castImageInput.value = ''; });
         panel.querySelectorAll('[data-h3-action]').forEach(function (node) { node.addEventListener('click', function () { handleAction(node.dataset.h3Action); }); });
         var projectTitle = document.getElementById('h3s-project-title');
         if (projectTitle) projectTitle.addEventListener('input', function () { state.project.title = projectTitle.value; saveProject(); });
@@ -738,6 +787,7 @@ var H3StudioTab = (function () {
         else if (action === 'export-project') downloadJson(safeName(state.project.title) + '.serenitymovie.json', state.project);
         else if (action === 'export-edit') downloadJson(safeName(state.project.title) + '.serenityedit.json', C.deliveryManifest(state.project));
         else if (action === 'add-shot') addShot();
+        else if (action === 'add-character') addCharacter();
         else if (action === 'duplicate-shot') duplicateShot();
         else if (action === 'delete-shot') deleteShot();
         else if (action === 'shot-left') moveShot(-1);
@@ -1011,7 +1061,7 @@ var H3StudioTab = (function () {
         try {
             assertEndlessResumeSafe(run);
             var segmentShot = C.endlessSegmentShot(run, index);
-            var request = C.renderRequest(segmentShot);
+            var request = C.renderRequest(segmentShot, state.project);
             var featureIssue = C.featureIssue(segmentShot, (h3Runner() || {}).features || {});
             if (featureIssue) throw new Error(featureIssue);
             var expectedSnapshot = C.copy(run.base_snapshot);
@@ -1169,7 +1219,7 @@ var H3StudioTab = (function () {
             if (shot.attention_backend !== resolvedAttention) {
                 requestShot = C.copy(shot); requestShot.attention_backend = resolvedAttention;
             }
-            var request = C.renderRequest(requestShot);
+            var request = C.renderRequest(requestShot, state.project);
             var runner = h3Runner();
             if (!runner || !h3Ready()) throw new Error('H3 compiler runtime prerequisites are unavailable.');
             var featureIssue = C.featureIssue(requestShot, runner.features || {});
