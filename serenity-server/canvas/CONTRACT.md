@@ -180,6 +180,21 @@ compatibility unless a separately reviewed contract migration changes them.
   preserves the selected prompt, dimensions, steps, seed, quantization,
   attention backend, cache policy, references, synchronized audio, and authored
   output-frame count.
+- Shot geometry is authored per request, not pinned to the sealed fixture
+  profile. Width and height are typed directly in the Shot inspector and
+  validated against the runtime's advertised `geometry_constraints`
+  (`shape_policy: "native_range"`, with `width_min`/`width_max`,
+  `height_min`/`height_max` and `dimension_step`); the listed resolutions are
+  presets that fill those fields, not the set of permitted shapes. Steps are
+  admitted 2 through 50. FPS remains sealed because delivery framing and the
+  17-frame internal alignment derive from it. Changing geometry, like changing
+  seed or steps, does not discard an authored prompt override.
+- H3 Studio does not implement an editing timeline. The bottom strip is a
+  continuity read whose shot widths are proportional to duration; the editing
+  timeline is the Video Edit tab. "Open in Video Editor" imports each shot's
+  selected take, in deck order, through
+  `/video_edit/projects/<id>/import_clip` and `addClipFromExternal` -- the same
+  route the H3 ControlNet screen uses -- skipping shots with no rendered take.
 - Native continuation accepts only a completed local `video-NNNN` at the same
   resolution. It reuses native video/audio motion context, accepts 5/22/39-frame
   windows, and trims the selected overlap from delivery.
