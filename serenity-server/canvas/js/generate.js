@@ -4690,12 +4690,34 @@ var GenerateTab = (function () {
             var h3SourceImage = String(state.initImagePath || '').trim();
             var h3Task = state.h3Mode === 'ref2va'
                 ? 'ref2va' : (h3SourceImage ? 'i2va' : 't2va');
+            // Ref2VA is a SIX-section contract (subject_definitions, summary,
+            // retention_analysis, detailed_description, overall_soundscape,
+            // non_diegetic_music) whose <Subject N>/<Picture N> labels are what
+            // actually bind the ordered references to the target video. Sending
+            // the raw prompt box here shipped a BASE-mode prompt into a Ref2VA
+            // render: the references were passed but nothing in the text told
+            // the model to retain them, so the prompt's own subject won.
+            // H3 Studio already compiles this correctly, so reuse that single
+            // source of truth rather than restating the contract here.
+            var h3Prompt = finalPrompt.trim();
+            if (h3Task === 'ref2va' && typeof H3ProjectContracts !== 'undefined') {
+                h3Prompt = H3ProjectContracts.compilePrompt({
+                    references: state.h3References,
+                    shot_description: h3Prompt,
+                    brief: h3Prompt,
+                    soundscape: state.h3Soundscape || 'N/A',
+                    music: state.h3Music || 'N/A',
+                    subject_definitions: '', summary: '', retention_analysis: '',
+                    prompt_override: '',
+                    duration_seconds: Math.max(1, Number(state.seconds) || 5)
+                });
+            }
             var h3Request = {
                 schema: 'serenity.genparams.v1',
                 model: 'minimax_h3',
                 runner: 'minimax_h3_compiler_request',
                 task: h3Task,
-                prompt: finalPrompt.trim(),
+                prompt: h3Prompt,
                 width: state.width,
                 height: state.height,
                 frames: state.frames,
