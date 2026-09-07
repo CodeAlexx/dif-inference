@@ -360,7 +360,17 @@ if [[ "$mode" == cold ]]; then
     if (( ${#CONTROL_ARGS[@]} )); then
       ROUTE+=(--h3-convrot-int8-layers "$(jq_get minimax_h3.profile.blocks)")
     fi
-    if (( ${#LORA_ARGS[@]} == 0 && ${#CONTROL_ARGS[@]} == 0 )); then
+    # Compact AdaLN reads the sealed modulation cache, and CUTLASS scaled-all
+    # in turn requires every selected plan to have compact AdaLN enabled
+    # (cuda_executor.cpp: "H3 CUTLASS scaled-all requires every selected
+    # compact-AdaLN ConvRot INT8 attention/MLP plan to be complete"). The cache
+    # is shaped by the profile's schedule and geometry, so an authored
+    # resolution or step count drops it above and modulation is computed online.
+    # The two flags therefore stand or fall together: video-0065 asked for both
+    # without the cache and hit the AdaLN refusal, video-0066 kept scaled-all
+    # alone and hit the plan-completeness refusal. Off-profile requests run
+    # without this fast path, which costs time, not correctness.
+    if (( ${#LORA_ARGS[@]} == 0 && ${#CONTROL_ARGS[@]} == 0 )) && [[ -n "$MODCACHE" ]]; then
       ROUTE+=(--h3-int8-cutlass-scaled-all --h3-int8-compact-adaln)
     fi
     log "route=convrot-int8 resident_layers=$RESIDENT exact cuDNN attention"

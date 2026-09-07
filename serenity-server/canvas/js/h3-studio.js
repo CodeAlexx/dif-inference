@@ -924,22 +924,32 @@ var H3StudioTab = (function () {
         waitForVideoProject(5000).then(function (projectId) {
             // Sequential on purpose: addClipFromExternal appends at the end of
             // the track, so concurrency would scramble the shot order.
+            // One unreachable take must not abandon the rest of the cut. Takes
+            // rendered against a different server's out-dir are not served here
+            // and answer 404; those shots are reported, not thrown.
+            var unreachable = [];
             return cut.reduce(function (chain, row) {
                 return chain.then(function () {
                     setStatus('Sending shot ' + (row.index + 1) + ' of ' + state.project.shots.length + ' to Video Edit…', 'live');
                     return fetch(row.url, { cache: 'no-store' }).then(function (response) {
-                        if (!response.ok) throw new Error(row.shot.title + ': HTTP ' + response.status);
+                        if (!response.ok) {
+                            unreachable.push((row.index + 1) + '. ' + (row.shot.title || 'untitled'));
+                            return null;
+                        }
                         return response.blob();
                     }).then(function (blob) {
+                        if (!blob) return null;
                         var form = new FormData();
                         form.append('file', blob, safeName(row.shot.title || ('shot-' + (row.index + 1))) + '.mp4');
                         return fetch('/video_edit/projects/' + encodeURIComponent(projectId) + '/import_clip', { method: 'POST', body: form });
                     }).then(function (response) {
+                        if (!response) return null;
                         return response.json().then(function (data) {
                             if (!response.ok || data.error) throw new Error(data.error || ('HTTP ' + response.status));
                             return data;
                         });
                     }).then(function (data) {
+                        if (!data) return;
                         var importedSeconds = Number(data.duration_frames || 0) / Math.max(1, Number(data.fps || C.NATIVE_FPS));
                         var seconds = Number(row.shot.duration_seconds) || importedSeconds || 5;
                         VideoEditTab.addClipFromExternal(data.source_path, row.shot.title || ('Shot ' + (row.index + 1)),
@@ -949,9 +959,12 @@ var H3StudioTab = (function () {
             }, Promise.resolve());
         }).then(function () {
             if (VideoEditTab.resize) VideoEditTab.resize();
-            var message = cut.length + ' shot(s) placed on the Video Edit timeline' +
-                (skipped ? ' — ' + skipped + ' shot(s) skipped with no rendered take' : '') + '.';
-            setStatus(message, 'live'); showToast(message, 'live');
+            var placed = cut.length - unreachable.length;
+            var message = placed + ' shot(s) placed on the Video Edit timeline' +
+                (skipped ? ' — ' + skipped + ' with no rendered take' : '') +
+                (unreachable.length ? ' — not served by this server: ' + unreachable.join(', ') : '') + '.';
+            setStatus(message, unreachable.length ? 'error' : 'live');
+            showToast(message, unreachable.length ? 'error' : 'live');
         }).catch(function (error) {
             setStatus('Video Edit import failed: ' + error.message, 'error');
             showToast('Video Edit import failed: ' + error.message, 'error');
