@@ -27,6 +27,7 @@
       "admission_pressure_percent": 5,
       "child_soft_fraction": 0.9,
       "window_pressure_percent": 30,
+      "admission_host_reserve_multiple": 1.25,
       "startup_timeout_seconds": 15,
       "maximum_runtime_seconds": 3600
     },

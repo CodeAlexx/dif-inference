@@ -37,6 +37,15 @@ class Policy:
     # is what the recorded incident (avg10 55.63%) trips, and systemd-oomd's own
     # ManagedOOMMemoryPressureLimit is a sustained some_pressure_percent.
     window_pressure_percent: float
+    # Multiple of the desktop reserve above which host-global PSI is treated as
+    # reclaim noise rather than scarcity, for admission only. A finished render
+    # leaves its streamed weights in the page cache, so host avg10 is still
+    # elevated when the next job asks to start even though the whole cache is
+    # instantly reclaimable: observed refusing a render at avg10 0.07 with 54 GB
+    # available. Dropping that cache by hand made the identical request admit at
+    # once, which is the proof it was never scarcity. The two real headroom
+    # checks above run first and are unchanged, as are cgroup and child sources.
+    admission_host_reserve_multiple: float
     startup_timeout_seconds: float
     maximum_runtime_seconds: float
 
@@ -56,6 +65,7 @@ class Policy:
                 result.admission_pressure_percent <= result.full_pressure_percent and
                 0.5 <= result.child_soft_fraction <= 0.95 and
                 result.some_pressure_percent <= result.window_pressure_percent <= 60 and
+                1 <= result.admission_host_reserve_multiple <= 2 and
                 result.startup_timeout_seconds <= 30):
             raise ValueError("Memory guard thresholds outside safe bounds")
         return result, raw
@@ -120,8 +130,16 @@ def admission(sample, policy, maximum, reserve):
         return "insufficient host headroom for child ceiling plus desktop reserve"
     if sample["session_nonreclaimable"] + maximum > sample["total"] - reserve:
         return "session plus child ceiling violates desktop reserve"
+    # Scarcity is measured against the headroom admission already demands
+    # (maximum + reserve), not the reserve alone: gating on the reserve alone can
+    # never fire, because the check above already rejected anything below
+    # maximum + reserve.
+    host_is_scarce = (sample["available"] < (maximum + reserve) *
+                      policy.admission_host_reserve_multiple)
     if any(v["avg10"] >= policy.admission_pressure_percent
-           for source in sample["pressure"].values() for v in source.values()):
+           for source, kinds in sample["pressure"].items()
+           if source != "host" or host_is_scarce
+           for v in kinds.values()):
         return "memory pressure already elevated before admission"
     return None
 

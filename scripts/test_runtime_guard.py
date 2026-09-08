@@ -74,6 +74,29 @@ class PolicyTests(unittest.TestCase):
             s = sample(second); s["pressure"]["parent"]["full"]["total"] = 10000
             self.assertIsNone(guard.observe(s))
 
+    def test_admission_ignores_host_cache_pressure_with_ample_memory(self):
+        """A finished render leaves its streamed weights in the page cache, so
+        host avg10 is still elevated when the next job asks to start. Observed
+        refusing a render at avg10 0.07 with 54 GB available; dropping the cache
+        by hand admitted the identical request immediately."""
+        s = sample()
+        s["pressure"]["host"] = {"some": {"total": 0, "avg10": 9.0},
+                                 "full": {"total": 0, "avg10": 9.0}}
+        self.assertIsNone(admission(s, POLICY, 24*GIB, 16*GIB))
+
+    def test_admission_still_refuses_when_memory_is_actually_short(self):
+        # Above the maximum+reserve floor (40 GiB) so the headroom check passes,
+        # but inside 1.25x of it, which is real scarcity for a 24 GiB job.
+        s = sample(); s["available"] = 44*GIB
+        s["pressure"]["host"] = {"some": {"total": 0, "avg10": 9.0},
+                                 "full": {"total": 0, "avg10": 9.0}}
+        self.assertIn("pressure", admission(s, POLICY, 24*GIB, 16*GIB))
+
+    def test_admission_never_ignores_cgroup_pressure(self):
+        """Only host-global PSI is conditioned on scarcity."""
+        s = sample(); s["pressure"]["parent"]["some"]["avg10"] = 9.0
+        self.assertIn("pressure", admission(s, POLICY, 24*GIB, 16*GIB))
+
     def test_reclaim_and_missing_accounting_fail_closed(self):
         for name in ["high","max","oom","oom_kill"]:
             s = sample(); s["events"][name] = 1
