@@ -616,8 +616,14 @@ fn build_krea2_chain(cfg: &Config, p: &JobParams, work: &Path, family: Family) -
     if !u.is_empty() {
         return Err(format!("request carries knobs the Krea 2 compiler chain cannot honor (refused, not dropped): {}", u.join("; ")));
     }
-    if p.width != 1024 || p.height != 1024 {
-        return Err(format!("{}x{} unsupported: the Krea 2 chain decodes 1024x1024 only", p.width, p.height));
+    // Geometry is authored, not pinned. This refused anything but 1024x1024,
+    // which is a compiled-preset convenience rather than a model limit -- the
+    // SDXL chain directly above accepts any positive multiple of eight, and the
+    // server already advertises Krea as shape_dispatch across 768..1344. The
+    // latent grid is what actually has to divide, so require the same multiple
+    // of eight and let the chain build for the requested shape.
+    if p.width <= 0 || p.height <= 0 || p.width % 8 != 0 || p.height % 8 != 0 {
+        return Err("Krea 2 width and height must be positive multiples of eight".into());
     }
     if p.steps < 1 {
         return Err(format!("steps={} must be >= 1", p.steps));
@@ -646,6 +652,13 @@ fn build_krea2_chain(cfg: &Config, p: &JobParams, work: &Path, family: Family) -
         format!("{}", p.cfg),
         if family == Family::Krea2Raw { "raw".into() } else { "turbo".into() },
         negative_file,
+        // Positional 8 is the diagnostic stop-after; empty in production.
+        String::new(),
+        // Authored geometry, positional 9 and 10. Without these the chain fell
+        // back to its 1024x1024 default and a requested size was silently
+        // ignored rather than rendered.
+        p.width.to_string(),
+        p.height.to_string(),
     ];
     Ok(Chain {
         family,

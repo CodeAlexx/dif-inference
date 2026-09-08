@@ -636,6 +636,22 @@ var H3ProjectContracts = (function () {
         return String(shot.shot_description || shot.brief || 'Describe the visible action, camera movement, dialogue, and synchronized sound for this shot.');
     }
 
+    // Restored: refDefinitions and the cast branch both call this, but the
+    // function itself was dropped when the cast layer was ported, so compiling
+    // any prompt for a shot carrying references threw "autoDefinition is not
+    // defined" and the take never reached the server. That broke every Ref2VA
+    // shot on this stack.
+    function autoDefinition(refs, item, index) {
+        var label = referenceLabel(refs, index);
+        var source = referenceSourceLabel(refs, index);
+        var note = String(item.note || '').trim() || ('the ordered ' + item.kind + ' reference at ' + item.path);
+        if (label !== source) return label + ' is ' + note + ' from ' + source + ', used as reusable visible content in the target video.';
+        if (item.kind === 'image') return label + ' is ' + note + ', used as a concrete keyframe or composition anchor.';
+        if (item.kind === 'video' && item.role === 'source_video') return label + ' is the source video for the target-video edit: ' + note + '.';
+        if (item.kind === 'video') return label + ' provides whole-video motion, camera, cut, or pacing structure: ' + note + '.';
+        return label + ' is the audio ' + item.audio_use + ' reference: ' + note + '.';
+    }
+
     function refDefinitions(shot, refs, project) {
         refs = refs || shot.references || [];
         var cast = castPathSet(project);

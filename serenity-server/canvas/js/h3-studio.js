@@ -11,6 +11,8 @@ var H3StudioTab = (function () {
     var state = {
         initialized: false,
         renderAll: null,
+        library: null,
+        currentProjectId: '',
         project: null,
         selectedShotId: 1,
         stageTab: 'director',
@@ -52,10 +54,80 @@ var H3StudioTab = (function () {
         return C.createProject();
     }
 
+    function projectSlug(title) {
+        var base = String(title || 'untitled').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        return base || 'untitled';
+    }
+
+    // The server stores each movie under <out_dir>/movies/<id>/project.json, which
+    // is what makes a movie and its rendered takes visible in any browser instead
+    // of trapped in one profile's localStorage. localStorage stays as the offline
+    // fallback for the movie currently open.
+    var serverSaveTimers = {};
+    function scheduleServerSave(id, project) {
+        if (!id) return;
+        if (serverSaveTimers[id]) clearTimeout(serverSaveTimers[id]);
+        var body = JSON.stringify(project);
+        serverSaveTimers[id] = setTimeout(function () {
+            fetch('/v1/h3/projects/' + encodeURIComponent(id), {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: body
+            }).catch(function () {});
+        }, 500);
+    }
+
     function saveProject(message) {
         state.project.updated_at = new Date().toISOString();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
+        if (!state.currentProjectId) state.currentProjectId = projectSlug(state.project.title);
+        if (state.library && state.library.projects) state.library.projects[state.currentProjectId] = state.project;
+        scheduleServerSave(state.currentProjectId, state.project);
         if (message) setStatus(message, '');
+    }
+
+    function openProject(id) {
+        if (!id || !state.library || !state.library.projects[id]) return;
+        state.currentProjectId = id;
+        state.project = state.library.projects[id];
+        state.selectedShotId = state.project.shots.length ? state.project.shots[0].id : 1;
+        state.assembledMovie = null;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
+        setStatus('Opened "' + (state.project.title || 'Untitled') + '"', '');
+        render();
+    }
+
+    function pullServerProjects() {
+        fetch('/v1/h3/projects', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data || !Array.isArray(data.projects)) return;
+                state.library = state.library || { projects: {} };
+                data.projects.forEach(function (entry) {
+                    if (!entry || !entry.id) return;
+                    try { state.library.projects[entry.id] = C.normalizeProject(entry.project); } catch (e) {}
+                });
+                // Keep the open movie in the list even if the server has not seen it.
+                if (!state.currentProjectId) state.currentProjectId = projectSlug(state.project.title);
+                if (!state.library.projects[state.currentProjectId]) {
+                    state.library.projects[state.currentProjectId] = state.project;
+                }
+                render();
+            })
+            .catch(function () {});
+    }
+
+    function projectPickerHtml() {
+        if (!state.library || !state.library.projects) return '';
+        var ids = Object.keys(state.library.projects);
+        if (!ids.length) return '';
+        var opts = ids.map(function (id) {
+            var p = state.library.projects[id];
+            var n = p && p.shots ? p.shots.length : 0;
+            var label = ((p && p.title) || 'Untitled') + ' \u00b7 ' + n + ' shot' + (n === 1 ? '' : 's');
+            return '<option value="' + attr(id) + '"' + selected(id, state.currentProjectId) + '>' + escapeHtml(label) + '</option>';
+        }).join('');
+        return '<label class="h3s-field" style="margin:0 10px 0 0;min-width:210px"><span>Movie</span>' +
+               '<select id="h3s-project-picker" class="h3s-select" title="Open a movie from this library">' + opts + '</select></label>';
     }
 
     function showToast(message, tone) {
@@ -136,11 +208,12 @@ var H3StudioTab = (function () {
             '<span class="h3s-chip"><strong>' + C.secondsText(totalSeconds()) + 's</strong> cut</span>' +
             '<span class="h3s-chip ' + (ready ? 'is-ready' : 'is-blocked') + '">' + (ready ? 'Runtime ready' : 'Runtime unavailable') + '</span>' +
             '</div>' +
-            '<div class="h3s-header-actions">' +
+            '<div class="h3s-header-actions">' + projectPickerHtml() +
             '<button class="h3s-btn is-quiet" data-h3-action="new-project">New</button>' +
             '<button class="h3s-btn is-quiet" data-h3-action="import-project">Import</button>' +
             '<button class="h3s-btn" data-h3-action="export-project">Export project</button>' +
             '<button class="h3s-btn" data-h3-action="export-edit">Export edit</button>' +
+            '<button class="h3s-btn is-primary" data-h3-action="assemble-movie">Stitch movie</button>' +
             '<button class="h3s-btn is-primary" data-h3-action="open-in-editor">Open in Video Editor</button>' +
             '</div></header>';
     }
@@ -258,9 +331,54 @@ var H3StudioTab = (function () {
         return '<aside class="h3s-left">' + projectControlsHtml() + biblesHtml() + shotListHtml() + '</aside>';
     }
 
+    // Stitch every shot's selected take into one delivery file. The server
+    // normalises each segment to a single container spec before concatenating --
+    // a raw concat of individually-encoded takes desynchronises the audio, which
+    // is what the norm_NN.mp4 intermediates next to the movie are for. Reads the
+    // saved movie; it does not write the project.
+    function assembleMovie() {
+        var id = state.currentProjectId;
+        if (!id) { setStatus('Save the movie before stitching.', 'error'); return; }
+        setStatus('Stitching movie\u2026', 'live');
+        showToast('Stitching movie\u2026', 'live');
+        fetch('/v1/h3/projects/' + encodeURIComponent(id) + '/movie', { method: 'POST' })
+            .then(function (response) {
+                return response.text().then(function (text) {
+                    if (!response.ok) throw new Error(text || ('HTTP ' + response.status));
+                    return JSON.parse(text);
+                });
+            })
+            .then(function (data) {
+                state.assembledMovie = data;
+                var skipped = (data.shots_skipped || []).length;
+                var message = (data.shots_used || []).length + ' shot(s) stitched into ' +
+                    (data.title || 'the movie') +
+                    (skipped ? ' \u2014 ' + skipped + ' skipped with no rendered take' : '') + '.';
+                setStatus(message, 'live'); showToast(message, 'live'); render();
+            })
+            .catch(function (error) {
+                setStatus('Stitch failed: ' + error.message, 'error');
+                showToast('Stitch failed: ' + error.message, 'error');
+            });
+    }
+
     function monitorHtml() {
         var shot = selectedShot();
         var mode = C.detectMode(shot, state.project);
+        // A just-stitched movie owns the monitor until the user goes back to the
+        // shots; otherwise the finished film is only a line of status text.
+        if (state.assembledMovie && state.assembledMovie.url) {
+            var film = state.assembledMovie;
+            return '<div class="h3s-monitor-wrap"><div class="h3s-monitor">' +
+                '<video controls autoplay preload="metadata" src="' + attr(film.url) + '"></video>' +
+                '<div class="h3s-monitor-bars"></div>' +
+                '<div class="h3s-monitor-hud"><span>' + escapeHtml(film.title || 'Movie') + ' \u00b7 ' +
+                    (film.shots_used || []).length + ' shots</span>' +
+                '<span>STITCHED DELIVERY \u00b7 <a href="' + attr(film.url) + '" target="_blank" rel="noopener">open</a></span></div>' +
+                '</div><div class="h3s-button-row" style="margin-top:9px">' +
+                '<button class="h3s-btn" data-h3-action="close-movie">Back to shots</button>' +
+                '<button class="h3s-btn" data-h3-action="assemble-movie">Re-stitch</button></div></div>';
+        }
         var take = shot.selected_take >= 0 ? shot.take_output_paths[shot.selected_take] : '';
         var src = take || shot.output_path || '';
         var content = src
@@ -748,6 +866,8 @@ var H3StudioTab = (function () {
         panel.querySelectorAll('[data-h3-action]').forEach(function (node) { node.addEventListener('click', function () { handleAction(node.dataset.h3Action); }); });
         var projectTitle = document.getElementById('h3s-project-title');
         if (projectTitle) projectTitle.addEventListener('input', function () { state.project.title = projectTitle.value; saveProject(); });
+        var projectPicker = document.getElementById('h3s-project-picker');
+        if (projectPicker) projectPicker.addEventListener('change', function () { openProject(projectPicker.value); });
         var resolution = document.getElementById('h3s-resolution');
         if (resolution) resolution.addEventListener('change', function () { if (baseShotMutationBlocked(selectedShot())) { showToast('The endless base dimensions are immutable during the active run.', 'error'); render(); return; } if (!resolution.value) return; var parts = resolution.value.split('x'); selectedShot().width = Number(parts[0]); selectedShot().height = Number(parts[1]); saveProject(); render(); });
         var action = document.getElementById('h3s-director-action');
@@ -839,6 +959,8 @@ var H3StudioTab = (function () {
         else if (action === 'import-project') document.getElementById('h3s-project-import').click();
         else if (action === 'export-project') downloadJson(safeName(state.project.title) + '.serenitymovie.json', state.project);
         else if (action === 'export-edit') downloadJson(safeName(state.project.title) + '.serenityedit.json', C.deliveryManifest(state.project));
+        else if (action === 'assemble-movie') assembleMovie();
+        else if (action === 'close-movie') { state.assembledMovie = null; render(); }
         else if (action === 'open-in-editor') openEditInVideoEditor();
         else if (action === 'add-shot') addShot();
         else if (action === 'add-character') addCharacter();
@@ -1126,7 +1248,8 @@ var H3StudioTab = (function () {
             var resolvedAttention = resolvedH3Attention(base);
             if (base.attention_backend !== resolvedAttention) base.attention_backend = resolvedAttention;
             var run = C.createEndlessRun(base, draft.target_seconds, draft.segment_seconds, draft.continuation_direction);
-            if (!armedConfirm('queue-endless', 'Queue ' + run.segment_durations.length + ' serial H3 render(s) for ' + C.secondsText(run.target_seconds) + ' seconds total? This starts GPU work.')) return;
+            // Same for the endless chain: its length is on screen before the
+            // button is pressed.
             state.project.endless = run;
             state.stageTab = 'endless';
             saveProject(); render();
@@ -1392,7 +1515,11 @@ var H3StudioTab = (function () {
             })) throw new Error('H3 task ' + request.task + ' is not available in the native compiler yet.');
             if (!(runner.step_cache_modes || []).some(function (mode) { return mode.id === request.step_cache && mode.available; }))
                 throw new Error('The selected H3 denoise cache is not implemented by this runner.');
-            if (!armedConfirm('queue-take', 'Queue one ' + C.secondsText(shot.duration_seconds) + '-second H3 take at ' + shot.width + '×' + shot.height + '? This starts GPU work.')) return;
+            // No confirm before a render: queueing a take is the button's whole
+            // purpose, and requiring a second click per shot also stalls
+            // "Render all shots" -- the batch queues each shot itself and would
+            // sit forever waiting for a human to re-click. The status line and
+            // the spine already report what started.
             setStatus('Submitting H3 take…', 'live');
             SerenityAPI.postVideo(request).then(function (job) {
                 if (!job || !(job.video_id || job.prompt_id)) throw new Error('server did not return a video job id');
@@ -1508,7 +1635,8 @@ var H3StudioTab = (function () {
     function init() {
         if (state.initialized) return;
         state.initialized = true; state.project = loadProject(); state.selectedShotId = state.project.shots[0].id;
-        render(); loadReadiness(); resumeEndless();
+        state.currentProjectId = projectSlug(state.project.title);
+        render(); loadReadiness(); resumeEndless(); pullServerProjects();
         fetch('/models/loras').then(function (response) { return response.ok ? response.json() : []; })
             .then(function (names) { state.loraNames = Array.isArray(names) ? names.filter(function (name) { return typeof name === 'string'; }) : []; render(); })
             .catch(function () { /* Manual installed names and server paths remain usable. */ });

@@ -97,6 +97,42 @@ class PolicyTests(unittest.TestCase):
         s = sample(); s["pressure"]["parent"]["some"]["avg10"] = 9.0
         self.assertIn("pressure", admission(s, POLICY, 24*GIB, 16*GIB))
 
+    def test_finished_runtime_is_not_a_failed_startup(self):
+        """A job that completes leaves an empty cgroup, so child_current reads
+        None exactly as it would for a runtime that never started. video-0081
+        logged "done .../video.mp4" with child_rc=0 and was still reported as a
+        guard cancel. An empty cgroup past the startup timeout is a finished
+        job, not a failed launch."""
+        alive = [True]
+        samples = [dict(sample(0), child_current=None)]
+        class R:
+            def snapshot(self):
+                if not samples:
+                    alive[0] = False
+                    return dict(sample(0), child_current=None)
+                return samples.pop(0)
+        events = []
+        rc = monitor(R(), POLICY, 24*GIB, 16*GIB, lambda: alive[0],
+                     lambda: None, events.append, sleep=lambda _s: None,
+                     populated=lambda: False)
+        self.assertEqual(rc, 0)
+        self.assertFalse([e for e in events if e.get("event") == "cancel"])
+
+    def test_unobservable_runtime_with_live_processes_still_cancels(self):
+        """The property the timeout exists for: a cgroup that never reports the
+        child while processes are still in it is a runtime that failed to come
+        up, and must still be cancelled."""
+        class R:
+            def snapshot(self):
+                return dict(sample(0), child_current=None)
+        events = []
+        rc = monitor(R(), POLICY, 24*GIB, 16*GIB, lambda: True,
+                     lambda: None, events.append, sleep=lambda _s: None,
+                     populated=lambda: True)
+        self.assertEqual(rc, 75)
+        self.assertIn("observable",
+                      [e for e in events if e.get("event") == "cancel"][0]["reason"])
+
     def test_reclaim_and_missing_accounting_fail_closed(self):
         for name in ["high","max","oom","oom_kill"]:
             s = sample(); s["events"][name] = 1

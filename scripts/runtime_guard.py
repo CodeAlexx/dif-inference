@@ -221,7 +221,15 @@ def monitor(reader, policy, maximum, reserve, live, stop, emit, sleep=time.sleep
             if not owner_live():
                 reason = "owning wrapper exited; refusing an orphaned runtime"
             elapsed = time.monotonic() - start
-            if sample["child_current"] is None and elapsed > policy.startup_timeout_seconds:
+            # child_current is None both when the runtime never started AND when
+            # it has already finished and left the cgroup empty. Cancelling on
+            # the timeout alone failed renders that had completed: video-0081
+            # logged "done .../video.mp4" with child_rc=0 and was still reported
+            # as a guard cancel, because the decode outlived the sampler's view
+            # of it. Only an unobservable cgroup that still holds processes is a
+            # runtime that failed to come up.
+            if (sample["child_current"] is None and populated() and
+                    elapsed > policy.startup_timeout_seconds):
                 reason = "runtime cgroup did not become observable"
             if elapsed > policy.maximum_runtime_seconds:
                 reason = "runtime deadline reached"

@@ -785,10 +785,17 @@ var GenerateTab = (function () {
             '<button id="gen-swap-btn" class="gen-aspect-action" title="Swap admitted dimensions"><i data-lucide="arrow-left-right"></i></button>' +
             '<button id="gen-optimal-btn" class="gen-aspect-action" title="Restore model default"><i data-lucide="sparkles"></i></button>' +
             '<button id="gen-aspect-lock" class="gen-aspect-action" style="display:none" aria-hidden="true"></button></div>' +
-            '<div class="gen-dim-row"><span class="gen-dim-label">Width</span><input type="range" id="gen-width-slider" class="gen-range" min="256" max="2048" step="64" value="1024" disabled>' +
-            '<input type="number" id="gen-custom-width" class="gen-number-input" value="1024" disabled></div>' +
-            '<div class="gen-dim-row"><span class="gen-dim-label">Height</span><input type="range" id="gen-height-slider" class="gen-range" min="256" max="2048" step="64" value="1024" disabled>' +
-            '<input type="number" id="gen-custom-height" class="gen-number-input" value="1024" disabled></div>' +
+            // Not disabled. Every model takes an authored size; the aspect list is
+            // a set of convenient presets, not the set of permitted shapes. These
+            // were shipped disabled and only ever re-enabled inside
+            // updateMinimaxH3VideoUI, so H3 could be sized freely and every other
+            // model -- Krea, Klein, SDXL, Z-Image -- was locked to whatever the
+            // dropdown happened to list. The blur/slider handlers below already
+            // clamp and sync; they simply never ran for anything but H3.
+            '<div class="gen-dim-row"><span class="gen-dim-label">Width</span><input type="range" id="gen-width-slider" class="gen-range" min="256" max="2048" step="64" value="1024">' +
+            '<input type="number" id="gen-custom-width" class="gen-number-input" value="1024"></div>' +
+            '<div class="gen-dim-row"><span class="gen-dim-label">Height</span><input type="range" id="gen-height-slider" class="gen-range" min="256" max="2048" step="64" value="1024">' +
+            '<input type="number" id="gen-custom-height" class="gen-number-input" value="1024"></div>' +
             '<div id="gen-aspect-preview" class="gen-aspect-preview"><span>1024×1024</span></div></div>';
         var sourceBody =
             '<div id="gen-single-source">' +
@@ -1014,7 +1021,7 @@ var GenerateTab = (function () {
             generateGroup('gen-settings-header', 'Model', modelBody, true, 'Select an installed model admitted by the image or video runtime.') +
             generateGroup('gen-core-header', 'Core Parameters', coreBody, true, 'The controls used by every admitted generation backend.') +
             '<section id="gen-variation-section">' + generateGroup('gen-variation-header', 'Variation Seed', variationBody, false, 'Blend deterministic secondary noise into supported model families.') + '</section>' +
-            generateGroup('gen-image-header', 'Resolution', resolutionBody, false, 'Only compiled, production-admitted shapes are listed.') +
+            generateGroup('gen-image-header', 'Resolution', resolutionBody, false, 'Presets are compiled shapes; width and height are authored freely.') +
             generateGroup('gen-source-header', 'Source Image', sourceBody, false, 'Upload once or reuse an Asset for admitted img2img and I2V generation.') +
             generateGroup('gen-sampling-header', 'Sampling', samplingBody, false, 'Sampler and scheduler values come from the selected backend capability report.') +
             '<section id="gen-video-section">' + generateGroup('gen-video-header', 'Video', videoBody, false, 'Video duration, frame rate, guidance, quantization, and audio parameters.') + '</section>' +

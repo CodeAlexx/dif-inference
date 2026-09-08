@@ -55,7 +55,7 @@ release_streamed_pages() {
   (( ${#paths[@]} )) || return 0
   # log() is defined further down, and this trap also fires on the early
   # validation exits above it, so emit the runner's prefix directly.
-  python3 "$(dirname "${BASH_SOURCE[0]}")/release_streamed_pages.py" "${paths[@]}" 2>&1 \
+  "$B/difpagecache" --min-mib 64 "${paths[@]}" 2>&1 \
     | while IFS= read -r line; do echo "[difc-h3] ${line#\[page-cache\] }"; done || true
 }
 trap release_streamed_pages EXIT
